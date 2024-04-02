@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use rocket::futures::{Stream, StreamExt, TryStreamExt};
+use rocket::http::{Cookie, CookieJar};
 use rocket::response::stream::{Event, EventStream};
 use rocket::tokio::select;
 use rocket::tokio::sync::broadcast::Sender;
@@ -32,10 +33,11 @@ async fn connect<'r>(
     room: String,
     db: &State<ChatroomsDB>,
     mut shutdown: Shutdown,
+    user: UserID,
 ) -> Option<ws::Stream![]> {
     let (tx, mut rx, chat) = {
         let db = db.read().await;
-        let (tx, chat) = db.get(&room).unwrap();
+        let (tx, chat) = db.get(&room)?;
         (tx.clone(), tx.subscribe(), chat.clone())
     };
     let stream = {
@@ -55,7 +57,9 @@ async fn connect<'r>(
                   if !msg.is_binary() {
                     continue;
                   }
-                  let msg: ChatMessage = serde_json::from_slice(&msg.into_data()).unwrap();
+                  let mut msg: ChatMessage = serde_json::from_slice(&msg.into_data()).unwrap();
+                  // Make sure the sender is the user who sent the message
+                  msg.sender = user.clone();
                   let _ = tx.send(msg);
                 }
               }
@@ -111,15 +115,17 @@ async fn check_user(name: String, db: &State<UserDB>) -> &'static str {
 }
 
 #[post("/createuser/<name>")]
-async fn create_user(name: String, db: &State<UserDB>) -> Status {
+async fn create_user(name: String, db: &State<UserDB>, cookies: &CookieJar<'_>) -> Status {
     let mut db = db.write().await;
-    let id = UserID(name);
-    if db.contains(&id) {
+    let id = UserID(name.clone());
+    let status = if db.contains(&id) {
         Status::Conflict
     } else {
         db.insert(id);
         Status::Ok
-    }
+    };
+    cookies.add_private(Cookie::new("user_id", name));
+    status
 }
 
 #[launch]

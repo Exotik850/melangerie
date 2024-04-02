@@ -7,14 +7,14 @@
 
   let uname = get(uname_store);
 
-  onMount(() => {
-    if (uname) {
-      if (!checkUser(uname)) {
-        localStorage.removeItem("OCusername");
-        location.reload();
-      }
-    }
-  });
+  // onMount(() => {
+  //   if (uname) {
+  //     if (!checkUser(uname)) {
+  //       localStorage.removeItem("OCusername");
+  //       location.reload();
+  //     }
+  //   }
+  // });
 </script>
 
 <main> 

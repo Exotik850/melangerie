@@ -1,7 +1,23 @@
+use rocket::{request::{FromRequest, Outcome}, Request};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone)]
 pub struct UserID(pub(crate) String);
+
+#[async_trait]
+impl<'r> FromRequest<'r> for UserID {
+  type Error = &'static str;
+  async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+    let cookie_jar = req.cookies();
+    let user_id = cookie_jar.get_private("user_id");
+    match user_id {
+      Some(id) => Outcome::Success(UserID(id.value().to_string())),
+      None => Outcome::Error((rocket::http::Status::Unauthorized, "No user_id cookie found")),
+    }
+  }
+}
+
+
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone, Copy)]
 pub struct MessageID(pub(crate) usize);
