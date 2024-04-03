@@ -2,6 +2,7 @@
   // import { setUserdata } from '../stores/chatStore.js'
   // import { checkUser, addUser } from '../stores/userStore.js'
   import { checkUser, createUser } from '$lib/index';
+  import { redirect } from '@sveltejs/kit';
 
   let isLoading = false
   let hasError = false
@@ -29,8 +30,7 @@
       if (addUserRes) {
         hasError = false
         isLoading = false
-        localStorage.setItem('OCusername', username);
-        location.reload()
+        sessionStorage.setItem('OCusername', username);
       } else {
         hasError = true
         isLoading = false
