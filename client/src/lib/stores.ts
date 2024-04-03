@@ -1,6 +1,6 @@
 import { browser } from "$app/environment";
 import { checkUser } from "$lib";
-import { writable, type Writable } from "svelte/store";
+import { writable, get } from "svelte/store";
 
 function get_uname() {
   let uname = sessionStorage.getItem("OCusername");
@@ -22,12 +22,12 @@ type Message = {
   timestamp: number,
 };
 // Create a new store with the given data.
-export const incomingMessages: Writable<State> = writable<State>({
+export const incomingMessages = writable<State>({
   requests: [],
 });
 export const connect = (url: URL) => {
-  $incomingMessages.socket = new WebSocket(url);
-  $incomingMessages.socket.addEventListener("message", async (message: any) => {
+  let ws = new WebSocket(url);
+  ws.addEventListener("message", async (message: any) => {
     message = await message.data.text();
     const data: Message = JSON.parse(message);
     console.log(data);
@@ -36,11 +36,16 @@ export const connect = (url: URL) => {
       requests: [data].concat(state.requests),
     }));
   });
+  incomingMessages.update((state) => ({
+    ...state,
+    socket: ws,
+  }));
 };
 
 export const sendMessage = (message: Message) => {
-  if ($incomingMessages.socket) {
-    $incomingMessages.socket.send(JSON.stringify(message));
+  let socket = get(incomingMessages).socket;
+  if (socket) {
+    socket.send(JSON.stringify(message));
     console.log(message, "Sent");
   } else {
     console.log("No socket connection");
