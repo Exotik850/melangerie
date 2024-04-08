@@ -67,11 +67,22 @@ pub struct ChatMessage {
     pub timestamp: u64,
 }
 
-impl Into<Vec<u8>> for ChatMessage {
-    fn into(self) -> Vec<u8> {
-        serde_json::to_vec(&self).unwrap()
-    }
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub enum Action {
+  Message(ChatMessage),
+  Join(ChatRoomID),
+  Leave(ChatRoomID),
+  Add(ChatRoomID, UserID),
+  Remove(ChatRoomID, UserID),
+  Create(ChatRoomID),
+  Delete(ChatRoomID),
 }
+
+// impl From<ChatMessage> for Vec<u8> {
+//     fn from(val: ChatMessage) -> Self {
+//         serde_json::to_vec(&val).unwrap()
+//     }
+// }
 
 impl std::fmt::Display for ChatMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

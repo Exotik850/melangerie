@@ -3,15 +3,13 @@ use std::path::PathBuf;
 
 use rocket::http::{Cookie, CookieJar};
 use rocket::request::{FromRequest, Outcome};
-use rocket::response::stream::{Event, EventStream};
 use rocket::tokio::select;
-use rocket::tokio::sync::broadcast::Sender;
 use rocket::Shutdown;
 use rocket::{
     fs::NamedFile, http::Status, tokio::sync::broadcast::channel, tokio::sync::RwLock, Request,
     State,
 };
-use types::{ChatMessage, InactiveUser, User, UserID, UserStatus};
+use types::{Action, ChatMessage, InactiveUser, User, UserID, UserStatus};
 use ws::{Message, WebSocket};
 mod types;
 
@@ -79,10 +77,11 @@ async fn connect<'r>(
             UserStatus::Inactive(chat) => &mut chat.messages,
         };
         let (tx, rx) = channel(16);
-        let out: Vec<_> = chat.drain(..).collect();
+        let out: Vec<_> = std::mem::take(chat);
         user.status = UserStatus::Active(ActiveUser { sender: tx });
         (rx, out)
     };
+
 
     let stream = ws.channel(move |mut stream| {
         Box::pin(async move {
@@ -103,39 +102,52 @@ async fn connect<'r>(
                     },
                     // A message has been received from the user
                     sent_msg = stream.next() => if let Some(Ok(msg)) = sent_msg {
-                        if let Message::Close(_) = msg {
-                            break;
-                        }
-
-                        log::info!("Received message: {:?}", msg);
-                        if !msg.is_binary() && !msg.is_text() {
-                            continue;
-                        }
-                        let mut msg: ChatMessage = serde_json::from_slice(&msg.into_data()).unwrap();
-                        // Make sure the sender is the user who sent the message
-                        msg.sender = user.0.clone();
-
-                        if let Some(users) = chat_db.read().await.get(&msg.room.0) {
-                          let mut user_db = user_db.write().await;
-                          for user in users {
-                              let Some(user) = user_db.get_mut(user) else {
-                                  log::error!("User not found: {:?}", user);
+                      if let Message::Close(_) = msg {
+                          break;
+                      }
+                      if !msg.is_binary() && !msg.is_text() {
+                        continue;
+                      }
+                      let data = msg.into_data();
+                      let Ok(msg) = serde_json::from_slice::<Action>(&data) else {
+                        log::error!("Failed to parse message: {:?}", String::from_utf8_lossy(&data));
+                        continue;
+                      };
+                      log::info!("Received message: {:?}", msg);
+                      match msg {
+                          Action::Message(msg) => {
+                                    // Make sure the sender is the user who sent the message
+                              if msg.sender != user.0 {
+                                log::error!("Invalid sender: {:?}", msg.sender);
+                                continue;
+                              }
+                              // Make sure the room exists
+                              let chat_db = chat_db.read().await;
+                              let Some(users) = chat_db.get(&msg.room.0) else {
                                   continue;
                               };
-                    
-                              match &mut user.status {
-                                  UserStatus::Active(ActiveUser { sender }) => {
-                                      let Ok(_) = sender.send(msg.clone()) else {
-                                          log::error!("Failed to send message to user: {:?}", user.name);
-                                          continue;
-                                      };
-                                  }
-                                  UserStatus::Inactive(InactiveUser { messages }) => {
-                                      messages.push(msg.clone());
+                              let mut user_db = user_db.write().await;
+                              for user in users {
+                                  let Some(user) = user_db.get_mut(user) else {
+                                      log::error!("User not found: {:?}", user);
+                                      continue;
+                                  };
+                          
+                                  match &mut user.status {
+                                      UserStatus::Active(ActiveUser { sender }) => {
+                                          let Ok(_) = sender.send(msg.clone()) else {
+                                              log::error!("Failed to send message to user: {:?}", user.name);
+                                              continue;
+                                          };
+                                      }
+                                      UserStatus::Inactive(InactiveUser { messages }) => {
+                                          messages.push(msg.clone());
+                                      }
                                   }
                               }
-                          }
-                      }
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }
@@ -212,25 +224,24 @@ async fn file_server(file: PathBuf) -> std::io::Result<NamedFile> {
     NamedFile::open(PathBuf::from(FILE_PATH).join(path)).await
 }
 
-#[post("/adduser/<room>/<add_user>")]
+#[post("/adduser/<room>/<user_id>")]
 async fn add_user_to_room(
     room: String,
-    add_user: String,
+    user_id: String,
     chat_db: &State<ChatroomsDB>,
-    user_id: SecureUser,
+    logged_in: SecureUser,
 ) -> Status {
     let mut chat_db = chat_db.write().await;
-    let add_user = UserID(add_user);
+    let add_user = UserID(user_id);
 
     // Check if the room exists
     let Some(users) = chat_db.get_mut(&room) else {
         return Status::NotFound;
     };
     // Check that the person adding the user is in the room
-    if !users.contains(&user_id.0) {
+    if !users.contains(&logged_in.0) {
         return Status::Unauthorized;
     }
-
     // Check if the user is already in the room
     if users.contains(&add_user) {
         return Status::Conflict;
