@@ -11,9 +11,15 @@ function get_uname() {
   }
 }
 export const uname_store = writable((browser && get_uname()) || "");
+export const messageStore = writable({} as Record<string, Message[]>);
+
+
 type State = {
   socket?: WebSocket,
-  requests: Array<Message>,
+};
+type Payload = {
+  action: string,
+  data: any,
 };
 type Message = {
   sender: string,
@@ -22,22 +28,20 @@ type Message = {
   timestamp: number,
 };
 // Create a new store with the given data.
-export const incomingMessages = writable<State>({
-  requests: [],
-});
+export const incomingMessages = writable<State>({});
 export const connect = (url: URL) => {
   let ws = new WebSocket(url);
   ws.addEventListener("message", async (message: any) => {
     message = await message.data.text();
     const data: Message = JSON.parse(message);
     console.log(data);
-    incomingMessages.update((state) => ({
-      ...state,
-      requests: [data].concat(state.requests),
-    }));
+    messageStore.update((state) => {
+      state[data.room] = state[data.room] || [];
+      state[data.room].push(data);
+      return state;
+    });
   });
   incomingMessages.update((state) => ({
-    ...state,
     socket: ws,
   }));
 };

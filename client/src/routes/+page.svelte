@@ -2,17 +2,21 @@
   import { get } from "svelte/store";
   import Modal from "../components/Modal.svelte";
   import { onMount } from "svelte";
-  import { connect, incomingMessages, sendMessage, uname_store } from "$lib/stores";
+  import {
+    connect,
+    messageStore,
+    sendMessage,
+    uname_store,
+  } from "$lib/stores";
+  import { host } from "$lib";
 
-  
   let uname = get(uname_store);
   let message = "";
-  $: requests = $incomingMessages.requests.reverse();
 
   onMount(async () => {
     if (uname) {
-      await fetch("/create/apple", {method: "POST"});
-      connect(new URL("ws://" + location.host + "/connect/apple"));
+      await fetch(host + "/create/apple", { method: "POST" });
+      connect(new URL("ws://" + host + "/connect/apple"));
     }
   });
 </script>
@@ -22,13 +26,26 @@
     You're logged in as {uname}
 
     <input type="text" bind:value={message} />
-    <button on:click={() => sendMessage({ sender: uname, room: "general", content: message, timestamp: Date.now() })}>
+    <button
+      on:click={() =>
+        sendMessage({
+          sender: uname,
+          room: "general",
+          content: message,
+          timestamp: Date.now(),
+        })}
+    >
       Send
     </button>
 
     <ul>
-      {#each requests as request}
-        <li>{request.sender} : {request.content}</li>
+      {#each Object.entries($messageStore) as [room, messages]}
+        <h2>{room}</h2>
+
+        {#each messages as message}
+          <li>{message.sender} : {message.content}</li>
+        {/each}
+        <br />
       {/each}
     </ul>
   {:else}
