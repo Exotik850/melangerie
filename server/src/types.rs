@@ -68,12 +68,13 @@ pub struct ChatMessage {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[serde(tag = "action", content = "data")]
 pub enum Action {
   Message(ChatMessage),
   Join(ChatRoomID),
   Leave(ChatRoomID),
-  Add(ChatRoomID, UserID),
-  Remove(ChatRoomID, UserID),
+  Add((ChatRoomID, UserID)),
+  Remove((ChatRoomID, UserID)),
   Create(ChatRoomID),
   Delete(ChatRoomID),
 }

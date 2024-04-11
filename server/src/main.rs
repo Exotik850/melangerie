@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use cors::CORS;
+use jsonwebtoken::EncodingKey;
 use rocket::http::{Cookie, CookieJar};
 use rocket::request::{FromRequest, Outcome};
 use rocket::tokio::select;
@@ -12,6 +14,10 @@ use rocket::{
 use types::{Action, ChatMessage, InactiveUser, User, UserID, UserStatus};
 use ws::{Message, WebSocket};
 mod types;
+mod cors;
+
+#[cfg(test)]
+mod test;
 
 #[macro_use]
 extern crate rocket;
@@ -265,18 +271,15 @@ async fn create_user(
     name: String,
     password: String,
     db: &State<UserDB>,
-    cookies: &CookieJar<'_>,
-) -> Status {
+) -> (Status, Option<String>) {
     let mut db = db.write().await;
     let id = UserID(name.clone());
     if db.contains_key(&id) {
-        return Status::Conflict;
+        return (Status::Conflict, None);
     }
-
     let Ok(hashed) = bcrypt::hash(&password, HASH_COST) else {
-        return Status::InternalServerError;
+        return (Status::InternalServerError, None);
     };
-
     // Insert the user into the database
     db.insert(
         id.clone(),
@@ -288,17 +291,47 @@ async fn create_user(
             }),
         },
     );
-    // Set the user_id and user_pwd cookies
-    cookies.add_private(Cookie::new("user_id", name));
-    cookies.add_private(Cookie::new("user_pwd", password));
-    Status::Ok
+    (Status::Ok, Some(encode_jwt(UserLogin { name, password })))
+}
+
+#[derive(serde::Deserialize)]
+pub struct UserLogin {
+    pub name: String,
+    pub password: String,
+}
+
+pub fn encode_jwt(user_data: UserLogin) -> String {
+  let secret = std::env::var("JWT_SECRET").expect("Need JWT Secret"); // TODO: Change this to a secure secret
+  let expiration = chrono::Utc::now() + chrono::Duration::days(1);
+  let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS512);
+  jsonwebtoken::encode(&header, &user_data.name, &EncodingKey::from_secret(secret.as_ref())).expect("Shouldnt fail?")
+}
+
+#[post("/login", data = "<user>")]
+async fn login_user(user: Json<UserLogin>, db: &State<UserDB>) -> Option<String> {
+    let db = db.read().await;
+    let UserLogin { name, password } = user.0;
+
+    let id = UserID(name.clone());
+    let user = match db.get(&id) {
+        Some(user) => user,
+        None => return None,
+    };
+
+    if bcrypt::verify(&password, &user.password).unwrap_or(false) {
+      Some(encode_jwt(UserLogin { name, password }))
+    } else {
+      None
+    }
 }
 
 #[launch]
 fn rocket() -> _ {
+    dotenvy::dotenv().ok();
     rocket::build()
         .manage(UserDB::default())
         .manage(ChatroomsDB::default())
+        .attach(CORS)
         .mount(
             "/",
             routes![
