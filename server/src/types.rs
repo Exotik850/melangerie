@@ -29,6 +29,12 @@ pub struct InactiveUser {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone)]
 pub struct UserID(pub(crate) String);
 
+impl From<String> for UserID {
+    fn from(s: String) -> Self {
+        UserID(s)
+    }
+}
+
 #[async_trait]
 impl<'r> FromRequest<'r> for UserID {
     type Error = &'static str;
@@ -70,13 +76,13 @@ pub struct ChatMessage {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(tag = "action", content = "data")]
 pub enum Action {
-  Message(ChatMessage),
-  Join(ChatRoomID),
-  Leave(ChatRoomID),
-  Add((ChatRoomID, UserID)),
-  Remove((ChatRoomID, UserID)),
-  Create(ChatRoomID),
-  Delete(ChatRoomID),
+    Message(ChatMessage),
+    Join(ChatRoomID),
+    Leave(ChatRoomID),
+    Add((ChatRoomID, UserID)),
+    Remove((ChatRoomID, UserID)),
+    Create(ChatRoomID),
+    Delete(ChatRoomID),
 }
 
 // impl From<ChatMessage> for Vec<u8> {
