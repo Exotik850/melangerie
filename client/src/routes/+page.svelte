@@ -4,35 +4,49 @@
   import { onMount } from "svelte";
   import {
     connect,
+    incomingMessages,
     messageStore,
     sendMessage,
-    uname_store,
+    token_store,
   } from "$lib/stores";
   import { host } from "$lib";
 
-  let uname = get(uname_store);
+  let token = get(token_store);
+  let uname: null | string;
   let message = "";
 
   onMount(async () => {
-    if (uname) {
+
+    window.onunload = () => {
+      if ($incomingMessages.socket) {
+        $incomingMessages.socket.close();
+      }
+    };
+
+    if (token) {
       await fetch(host + "/create/apple", { method: "POST" });
-      connect(new URL("ws://" + host + "/connect/apple"));
+      connect(new URL(host + "/connect"));
+      uname = JSON.parse(atob(token.split(".")[1]))
+      console.log("Found ", uname)
     }
   });
 </script>
 
 <main>
-  {#if uname}
-    You're logged in as {uname}
+  {#if token}
+    You're logged in
 
     <input type="text" bind:value={message} />
     <button
       on:click={() =>
         sendMessage({
-          sender: uname,
-          room: "general",
-          content: message,
-          timestamp: Date.now(),
+          action: "Message",
+          data: {
+            sender: token,
+            room: "general",
+            content: message,
+            timestamp: Date.now(),
+          }
         })}
     >
       Send

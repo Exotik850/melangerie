@@ -33,7 +33,7 @@
     if (addUserRes) {
       hasError = false;
       isLoading = false;
-      sessionStorage.setItem("OCusername", username);
+      sessionStorage.setItem("OCTOKEN", username);
     } else {
       hasError = true;
       isLoading = false;
@@ -156,7 +156,7 @@
       if (loginRes) {
         hasError = false;
         isLoading = false;
-        sessionStorage.setItem("OCusername", username); // Redirect to the desired page after successful login //
+        localStorage.setItem("OCTOKEN", loginRes); // Redirect to the desired page after successful login //
       } else {
         hasError = true;
         isLoading = false;
@@ -171,13 +171,14 @@
         if (addUserRes) {
           hasError = false;
           isLoading = false;
-          sessionStorage.setItem("OCusername", username); // Redirect to the desired page after successful user creation //
+          localStorage.setItem("OCTOKEN", addUserRes); // Redirect to the desired page after successful user creation //
         } else {
           hasError = true;
           isLoading = false;
         }
       }
     }
+    location.reload();
   };
   const toggleMode = () => {
     isLogin = !isLogin;

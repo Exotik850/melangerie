@@ -7,12 +7,30 @@ export async function checkUser(name: string): boolean {
   return res.text === 'found';
 }
 
-export async function createUser(name: string, password: string): boolean {
-  let res = await fetch(host + '/createuser/' + name + '/' + password, {method: 'POST'});
-  return res.status === 200;
+export async function createUser(name: string, password: string): string | null {
+  let res = await fetch(host + '/createuser', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'name=' + name + '&password=' + password,
+  });
+  if (res.status === 200) {
+    return await res.text();
+  }
+  return null;
 }
 
-export async function loginUser(name: string, password: string): boolean {
-  let res = await fetch(host + '/login/' + name + '/' + password, {method: 'POST'});
-  return res.status === 200;
+export async function loginUser(name: string, password: string): string | null {
+  let res = await fetch(host + '/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'name=' + name + '&password=' + password,
+  });
+  if (res.status === 200) {
+    return await res.text();
+  }
+  return null;
 }
