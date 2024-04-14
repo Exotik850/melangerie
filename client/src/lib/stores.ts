@@ -1,18 +1,22 @@
 import { browser } from "$app/environment";
 import { checkUser, host } from "$lib";
-import { writable, get } from "svelte/store";
+import { writable, get, derived } from "svelte/store";
 
 let access_token: null | string = null;
-export const token_store = writable((browser && get_token()) || "");
+export const token_store = writable("");
+export let uname = derived(token_store, (token) => {
+  if (!token) return "";
+  return JSON.parse(atob(token.split(".")[1])).name;
+});
 token_store.subscribe((val) => {
   console.log("Token store updated", val);
 })
 export const messageStore = writable({} as Record<string, Message[]>);
 
-function get_token() {
-  let token = localStorage.getItem("OCTOKEN") || null;
-  return token;
-}
+// function get_token() {
+//   let token = localStorage.getItem("OCTOKEN") || null;
+//   return token;
+// }
 
 type State = {
   socket?: WebSocket,
@@ -38,13 +42,12 @@ export const connect = (url: URL) => {
   let ws = new WebSocket(url);
   ws.onopen = () => {
     console.log("Connected to server");
-    let token = get(token_store).toString();
+    let token = get(token_store);
     console.log("Sending token", token);
     ws.send(token);
   };
   ws.onclose = () => {
     console.log("Connection closed");
-
   }
   // ws.send(token);
   ws.addEventListener("message", async (message: any) => {
@@ -78,9 +81,9 @@ export const listRooms = async () => {
     return;
   }
   let res = await fetch(host + "/chat/list", {
-    // headers: {
-    //   Authorization: "Bearer " + token,
-    // },
+    headers: {
+      authorization: token,
+    },
   });
   let data = await res.json();
   return data;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { checkUser, createUser, loginUser } from "$lib/index";
+  import { token_store } from "$lib/stores";
   import { redirect } from "@sveltejs/kit";
   let isLoading = false;
   let hasError = false;
@@ -8,42 +9,30 @@
   let username: string = "";
   let password: string = "";
   let timeStamp = new Date();
+  async function handleSignup() {
+    const userExists = await checkUser(username);
+    if (userExists) return false;
+    return await createUser(username, password);
+  }
+
   const handleSubmit = async () => {
-    hasWhiteSpace = false;
-    isLoading = true; // Sanitize username
-    if (username.indexOf(" ") >= 0) {
-      hasWhiteSpace = true;
+    hasWhiteSpace = username.includes(" ");
+    if (hasWhiteSpace) {
       isLoading = false;
       return;
     }
-    if (isLogin) {
-      let loginRes = await loginUser(username, password);
-      if (loginRes) {
-        hasError = false;
-        isLoading = false;
-        localStorage.setItem("OCTOKEN", loginRes); // Redirect to the desired page after successful login //
-      } else {
-        hasError = true;
-        isLoading = false;
-      }
-    } else {
-      let checkUserRes = await checkUser(username);
-      if (checkUserRes) {
-        hasError = true;
-        isLoading = false;
-      } else {
-        let addUserRes = await createUser(username, password);
-        if (addUserRes) {
-          hasError = false;
-          isLoading = false;
-          localStorage.setItem("OCTOKEN", addUserRes); // Redirect to the desired page after successful user creation //
-        } else {
-          hasError = true;
-          isLoading = false;
-        }
-      }
+    isLoading = true; // Sanitize username
+    hasError = false;
+    const result = isLogin
+      ? await loginUser(username, password)
+      : await handleSignup();
+
+    isLoading = false;
+    hasError = !result;
+
+    if (result) {
+      $token_store = result;
     }
-    location.reload();
   };
   const toggleMode = () => {
     isLogin = !isLogin;

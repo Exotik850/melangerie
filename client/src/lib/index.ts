@@ -1,6 +1,6 @@
 // place files you want to import through the `$lib` alias in this folder.
 
-export const host = "http://localhost:8080";
+export const host = "http://10.0.0.239:8080";
 
 export type JWT = {
   name: string,
