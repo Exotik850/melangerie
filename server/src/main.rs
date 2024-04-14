@@ -1,9 +1,9 @@
-mod cors;
-mod chat;
 mod auth;
-mod types;
+mod chat;
+mod cors;
 #[cfg(test)]
 mod test;
+mod types;
 #[macro_use]
 extern crate rocket;
 const FILE_PATH: &str = "./public";
@@ -28,9 +28,6 @@ async fn file_server(file: PathBuf) -> std::io::Result<NamedFile> {
     NamedFile::open(PathBuf::from(FILE_PATH).join(path)).await
 }
 
-
-
-
 #[launch]
 fn rocket() -> _ {
     dotenvy::dotenv().ok();
@@ -39,18 +36,20 @@ fn rocket() -> _ {
         .manage(ChatroomsDB::default())
         .attach(cors::CORS)
         .mount(
-            "/",
+            "/chat",
             routes![
-                file_server,
-                chat::create_room,
                 chat::connect,
+                chat::create_room,
                 chat::add_user_to_room,
                 chat::send_message,
-                auth::check_user,
-                auth::create_user,
-                auth::login_user,
+                chat::list_rooms
             ],
         )
-        
+        .mount(
+            "/auth",
+            routes![auth::create_user, auth::login_user, auth::check_user],
+        )
+        .mount("/", routes![file_server,])
+
     // .register("/", catchers![echo_catcher])
 }
