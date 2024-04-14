@@ -14,7 +14,7 @@ pub struct Credentials<'a> {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct JWT {
-    pub name: String,
+    pub name: UserID,
     pub exp: u64,
 }
 
@@ -93,7 +93,7 @@ pub fn encode_jwt<T: AsRef<[u8]>>(name: &str, secret: T) -> String {
     jsonwebtoken::encode(
         &header,
         &JWT {
-            name: name.to_string(),
+            name: name.to_string().into(),
             exp,
         },
         &jsonwebtoken::EncodingKey::from_secret(secret.as_ref()),
