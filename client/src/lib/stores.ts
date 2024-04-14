@@ -1,5 +1,5 @@
 import { browser } from "$app/environment";
-import { checkUser } from "$lib";
+import { checkUser, host } from "$lib";
 import { writable, get } from "svelte/store";
 
 let access_token: null | string = null;
@@ -66,8 +66,22 @@ export const sendMessage = (message: Payload) => {
   let socket = get(incomingMessages).socket;
   if (socket) {
     socket.send(JSON.stringify(message));
-    console.log(message, "Sent");
   } else {
     console.log("No socket connection");
   }
 };
+
+export const listRooms = async () => {
+  let token = get(token_store);
+  if (!token) {
+    console.log("No token found");
+    return;
+  }
+  let res = await fetch(host + "/chat/list", {
+    // headers: {
+    //   Authorization: "Bearer " + token,
+    // },
+  });
+  let data = await res.json();
+  return data;
+}

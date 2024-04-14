@@ -2,13 +2,18 @@
 
 export const host = "http://localhost:8080";
 
+export type JWT = {
+  name: string,
+  exp: number,
+}
+
 export async function checkUser(name: string): boolean {
-  let res = await fetch(host + '/checkuser/' + name);
+  let res = await fetch(host + '/auth/checkuser/' + name);
   return res.text === 'found';
 }
 
 export async function createUser(name: string, password: string): string | null {
-  let res = await fetch(host + '/createuser', {
+  let res = await fetch(host + '/auth/createuser', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -22,7 +27,7 @@ export async function createUser(name: string, password: string): string | null 
 }
 
 export async function loginUser(name: string, password: string): string | null {
-  let res = await fetch(host + '/login', {
+  let res = await fetch(host + '/auth/login', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
