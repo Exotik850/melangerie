@@ -10,7 +10,7 @@ export let uname = derived(token_store, (token) => {
 });
 token_store.subscribe((val) => {
   console.log("Token store updated", val);
-})
+});
 export const messageStore = writable<Record<string, Message[]>>({});
 
 // function get_token() {
@@ -19,17 +19,17 @@ export const messageStore = writable<Record<string, Message[]>>({});
 // }
 
 type State = {
-  socket?: WebSocket,
+  socket?: WebSocket;
 };
 type Payload = {
-  action: string,
-  data: any,
+  action: string;
+  data: any;
 };
 type Message = {
-  sender?: string,
-  room: string,
-  content: string,
-  timestamp: number,
+  sender?: string;
+  room: string;
+  content: string;
+  timestamp: number;
 };
 // Create a new store with the given data.
 export const incomingMessages = writable<State>({});
@@ -48,12 +48,11 @@ export const connect = (url: URL) => {
   };
   ws.onclose = () => {
     console.log("Connection closed");
-  }
+  };
   // ws.send(token);
   ws.addEventListener("message", async (message: any) => {
-    message = await message.data.text();
-    const data: Payload = JSON.parse(message);
-    console.log(data);
+    console.log("Received:", message.data);
+    const data: Payload = JSON.parse(await message.data.text());
     handlePayload(data);
   });
   incomingMessages.update((state) => ({
@@ -64,26 +63,27 @@ export const connect = (url: URL) => {
 function handlePayload(payload: Payload) {
   switch (payload.action) {
     case "Message":
+      const room = payload.data.room;
       messageStore.update((state) => {
-        state[payload.data.room] = state[payload.data.room] || [];
-        state[payload.data.room].push(payload.data);
+        state[room] = state[room] || [];
+        state[room].push(payload.data);
         return state;
       });
       break;
     case "Join":
-      const room = payload.data[0];
+      const [roomName, user] = payload.data;
       messageStore.update((state) => {
-        state[room] = state[room] || [];
-        // if (payload.data[1] === get(uname)) {
-        //   return state;
-        // };
-        state[room].push({
+        state[roomName] = state[roomName] || [];
+        if (user === get(uname)) {
+          return state;
+        }
+        state[roomName].push({
           sender: "Server",
-          content: `${payload.data[1]} joined the room`,
+          content: `${user} joined the room`,
           timestamp: Date.now(),
         });
         return state;
-      })
+      });
 
     default:
       break;
@@ -112,4 +112,4 @@ export const listRooms = async () => {
   });
   let data = await res.json();
   return data;
-}
+};

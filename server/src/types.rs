@@ -68,10 +68,10 @@ pub struct MessageID(pub(crate) usize);
 pub struct ChatRoomID(pub(crate) String);
 
 impl<'r> FromParam<'r> for ChatRoomID {
-  type Error = &'static str;
-  fn from_param(param: &'r str) -> Result<Self, Self::Error> {
-      Ok(ChatRoomID(param.to_string()))
-  }
+    type Error = &'static str;
+    fn from_param(param: &'r str) -> Result<Self, Self::Error> {
+        Ok(ChatRoomID(param.to_string()))
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

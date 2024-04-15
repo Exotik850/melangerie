@@ -1,7 +1,15 @@
+use crate::{
+    types::{User, UserStatus},
+    UserDB, UserID,
+};
 use jsonwebtoken::Algorithm;
-use rocket::{form::Form, http::Status, request::{FromRequest, Outcome}, Request};
-use crate::{types::{User, UserStatus}, UserDB, UserID};
 use rocket::State;
+use rocket::{
+    form::Form,
+    http::Status,
+    request::{FromRequest, Outcome},
+    Request,
+};
 
 const HASH_COST: u32 = 12;
 
@@ -11,15 +19,14 @@ pub struct Credentials<'a> {
     password: &'a str,
 }
 
-
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct JWT {
+pub struct Jwt {
     pub name: UserID,
     pub exp: u64,
 }
 
 #[async_trait]
-impl<'r> FromRequest<'r> for JWT {
+impl<'r> FromRequest<'r> for Jwt {
     type Error = &'static str;
     async fn from_request(r: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         let Some(token) = r.headers().get_one("authorization") else {
@@ -44,36 +51,41 @@ pub async fn login_user(login: Form<Credentials<'_>>, db: &State<UserDB>) -> Opt
     let Ok(secret) = std::env::var("JWT_SECRET") else {
         log::error!("JWT_SECRET not set");
         return None;
-    };    
+    };
     let id = UserID(name.into());
     let db = db.read().await;
     let user = db.get(&id)?;
-    bcrypt::verify(password, &user.password).unwrap_or(false).then(|| encode_jwt(name, secret))
-}    
+    bcrypt::verify(password, &user.password)
+        .unwrap_or(false)
+        .then(|| encode_jwt(name, secret))
+}
 
 #[get("/checkuser/<name>")]
 pub async fn check_user(name: String, db: &State<UserDB>) -> &'static str {
     if db.read().await.contains_key(&UserID(name)) {
         "found"
-    } else {  
+    } else {
         "not found"
-    }    
-}    
+    }
+}
 
 #[post("/createuser", data = "<form>")]
-pub async fn create_user(form: Form<Credentials<'_>>, db: &State<UserDB>) -> (Status, Option<String>) {
+pub async fn create_user(
+    form: Form<Credentials<'_>>,
+    db: &State<UserDB>,
+) -> (Status, Option<String>) {
     let Credentials { name, password } = form.into_inner();
     let mut db = db.write().await;
     let id = UserID(name.into());
     if db.contains_key(&id) {
         return (Status::Conflict, None);
-    }    
+    }
     let Ok(hashed) = bcrypt::hash(password, HASH_COST) else {
         return (Status::InternalServerError, None);
-    };    
+    };
     let Ok(secret) = std::env::var("JWT_SECRET") else {
         return (Status::InternalServerError, None);
-    };    
+    };
     // Insert the user into the database
     db.insert(
         id.clone(),
@@ -81,17 +93,17 @@ pub async fn create_user(form: Form<Credentials<'_>>, db: &State<UserDB>) -> (St
             name: id,
             messages: vec![],
             password: hashed,
-            status: UserStatus::Inactive,    
-        },    
-    );    
+            status: UserStatus::Inactive,
+        },
+    );
     (Status::Ok, Some(encode_jwt(name, secret)))
-}    
+}
 pub fn encode_jwt<T: AsRef<[u8]>>(name: &str, secret: T) -> String {
     let exp = jsonwebtoken::get_current_timestamp() + 3600;
     let header = jsonwebtoken::Header::new(Algorithm::HS512);
     jsonwebtoken::encode(
         &header,
-        &JWT {
+        &Jwt {
             name: name.to_string().into(),
             exp,
         },
@@ -100,9 +112,9 @@ pub fn encode_jwt<T: AsRef<[u8]>>(name: &str, secret: T) -> String {
     .expect("Shouldnt fail?")
 }
 
-pub fn decode_jwt<T: AsRef<[u8]>>(token: &str, secret: T) -> Option<JWT> {
+pub fn decode_jwt<T: AsRef<[u8]>>(token: &str, secret: T) -> Option<Jwt> {
     let validation = jsonwebtoken::Validation::new(Algorithm::HS512);
-    let token = jsonwebtoken::decode::<JWT>(
+    let token = jsonwebtoken::decode::<Jwt>(
         token.trim(),
         &jsonwebtoken::DecodingKey::from_secret(secret.as_ref()),
         &validation,

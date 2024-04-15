@@ -34,7 +34,7 @@ fn rocket() -> _ {
     rocket::build()
         .manage(UserDB::default())
         .manage(ChatroomsDB::default())
-        .attach(cors::CORS)
+        .attach(cors::Cors)
         .mount(
             "/chat",
             routes![

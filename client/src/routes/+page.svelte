@@ -1,19 +1,16 @@
 <script lang="ts">
-  import ChatRoom from './ChatRoom.svelte';
-  import {
-    token_store,
-  } from "$lib/stores";
+  import ChatRoom from "./ChatRoom.svelte";
+  import { token_store } from "$lib/stores";
   import Modal from "../components/Modal.svelte";
 </script>
 
 <main>
   {#if $token_store}
-    <ChatRoom/>
+    <ChatRoom />
   {:else}
-    <Modal/>
+    <Modal />
   {/if}
 </main>
 
 <style lang="scss">
-
 </style>

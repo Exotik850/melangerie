@@ -33,7 +33,7 @@
         messageStore.update((store) => {
           store[roomName] = [];
           return store;
-        })
+        });
       }
     }
   };
@@ -52,9 +52,9 @@
     <button on:click={createRoom}>Create Room</button>
     <h3>Rooms</h3>
     <ul>
-        {#each Object.entries($messageStore) as [room, _]}
-          <li><button on:click={() => joinRoom(room)}>{room}</button></li>
-        {/each}
+      {#each Object.entries($messageStore) as [room, _]}
+        <li><button on:click={() => joinRoom(room)}>{room}</button></li>
+      {/each}
     </ul>
   </div>
   <MessageBox bind:selectedRoom />

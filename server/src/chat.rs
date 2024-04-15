@@ -1,6 +1,6 @@
 use crate::types::{ChatRoomID, ServerAction, UserAction};
 use crate::{
-    auth::{decode_jwt, JWT},
+    auth::{decode_jwt, Jwt},
     types::{ChatMessage, UserStatus},
     ChatroomsDB, UserDB, UserID,
 };
@@ -26,11 +26,11 @@ pub async fn connect<'r>(
 }
 
 #[get("/list")]
-pub async fn list_rooms(chat_db: &State<ChatroomsDB>, user: JWT) -> Json<Vec<String>> {
+pub async fn list_rooms(chat_db: &State<ChatroomsDB>, user: Jwt) -> Json<Vec<String>> {
     let db = chat_db.read().await;
     let rooms = db
         .iter()
-        .filter_map(|(name, users)| users.contains(&user.name).then(|| name.0.clone()))
+        .filter(|&(name, users)| users.contains(&user.name)).map(|(name, users)| name.0.clone())
         .collect();
     Json(rooms)
 }
@@ -41,7 +41,7 @@ pub async fn add_user_to_room(
     user_id: UserID,
     user_db: &State<UserDB>,
     chat_db: &State<ChatroomsDB>,
-    auth_user: JWT,
+    auth_user: Jwt,
 ) -> Status {
     {
         let mut cdb = chat_db.write().await;
@@ -114,7 +114,7 @@ pub async fn create_room(
     chat_db: &State<ChatroomsDB>,
     user_db: &State<UserDB>,
     users: PathBuf,
-    user: JWT,
+    user: Jwt,
 ) -> Status {
     {
         let mut cdb = chat_db.write().await;
@@ -172,13 +172,13 @@ async fn get_auth(stream: &mut DuplexStream) -> Option<UserID> {
 }
 
 async fn send_msg(msg: ChatMessage, chat_db: &State<ChatroomsDB>, user_db: &State<UserDB>) {
-  let db = chat_db.read().await;
-  let Some(room) = db.get(&msg.room) else {
-    log::error!("Room not found: {:?}", msg.room);
-    return;
-  };
-  let mut user_db = user_db.write().await;
-  for user in room {
+    let db = chat_db.read().await;
+    let Some(room) = db.get(&msg.room) else {
+        log::error!("Room not found: {:?}", msg.room);
+        return;
+    };
+    let mut user_db = user_db.write().await;
+    for user in room {
         let Some(user) = user_db.get_mut(user) else {
             log::error!("User not found: {:?}", user);
             continue;
@@ -230,7 +230,12 @@ async fn handle_connection(
         (rx, user.messages.clone())
     };
 
-    for room in chat_db.read().await.iter().filter_map(|f| f.1.contains(&id).then_some(f.0)) {
+    for room in chat_db
+        .read()
+        .await
+        .iter()
+        .filter_map(|f| f.1.contains(&id).then_some(f.0))
+    {
         let msg = ServerAction::Join((room.clone(), id.clone()));
         let _ = stream
             .send(Message::binary(serde_json::to_vec(&msg).unwrap()))
@@ -255,7 +260,6 @@ async fn handle_connection(
             },
             // A message has been sent to this user
             recv_msg = rx.recv() => if let Ok(msg) = recv_msg {
-                log::info!("Sending message: {:?}", msg);
                 let _ = stream.send(Message::binary(serde_json::to_vec(&msg).unwrap())).await;
             },
             // A message has been received from the user
