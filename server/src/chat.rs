@@ -1,7 +1,7 @@
-use crate::types::Action;
+use crate::types::{ChatRoomID, ServerAction, UserAction};
 use crate::{
     auth::{decode_jwt, JWT},
-    types::{ActiveUser, ChatMessage, InactiveUser, UserStatus},
+    types::{ChatMessage, UserStatus},
     ChatroomsDB, UserDB, UserID,
 };
 use rocket::futures::{SinkExt, StreamExt};
@@ -26,36 +26,56 @@ pub async fn connect<'r>(
 }
 
 #[get("/list")]
-pub async fn list_rooms(chat_db: &State<ChatroomsDB>) -> Json<Vec<String>> {
+pub async fn list_rooms(chat_db: &State<ChatroomsDB>, user: JWT) -> Json<Vec<String>> {
     let db = chat_db.read().await;
-    Json(db.keys().cloned().collect())
+    let rooms = db
+        .iter()
+        .filter_map(|(name, users)| users.contains(&user.name).then(|| name.0.clone()))
+        .collect();
+    Json(rooms)
 }
 
 #[post("/adduser/<room>/<user_id>")]
 pub async fn add_user_to_room(
-    room: String,
-    user_id: String,
+    room: ChatRoomID,
+    user_id: UserID,
+    user_db: &State<UserDB>,
     chat_db: &State<ChatroomsDB>,
-    // user: JWT,
+    auth_user: JWT,
 ) -> Status {
-    // let logged_in = user.name;
-    let mut chat_db = chat_db.write().await;
-    let add_user = UserID(user_id);
+    {
+        let mut cdb = chat_db.write().await;
 
-    // Check if the room exists
-    let Some(users) = chat_db.get_mut(&room) else {
-        return Status::NotFound;
-    };
-    // // Check that the person adding the user is in the room
-    // if !users.contains(&logged_in) {
-    //     return Status::Unauthorized;
-    // }
-    // Check if the user is already in the room
-    if users.contains(&add_user) {
-        return Status::Conflict;
+        // Check if the room exists
+        let Some(users) = cdb.get_mut(&room) else {
+            return Status::NotFound;
+        };
+
+        // Check if the user exists
+        let Some(_) = user_db.read().await.get(&user_id) else {
+            return Status::NotFound;
+        };
+
+        // Check if the user is already in the room
+        if users.contains(&user_id) {
+            return Status::Conflict;
+        }
+        // Add the user to the room
+        users.push(user_id.clone());
     }
-    // Add the user to the room
-    users.push(add_user);
+
+    send_msg(
+        ChatMessage {
+            sender: "Server".into(),
+            room,
+            content: format!("{} added {} to the room", auth_user.name.0, user_id.0),
+            timestamp: jsonwebtoken::get_current_timestamp(),
+        },
+        chat_db,
+        user_db,
+    )
+    .await;
+
     Status::Ok
 }
 
@@ -66,7 +86,7 @@ pub async fn send_message(
     user_db: &State<UserDB>,
 ) -> Status {
     let db = chat_db.read().await;
-    if let Some(users) = db.get(&msg.0.room.0) {
+    if let Some(users) = db.get(&msg.0.room) {
         let mut user_db = user_db.write().await;
         for user in users {
             let Some(user) = user_db.get_mut(user) else {
@@ -74,17 +94,13 @@ pub async fn send_message(
                 continue;
             };
 
-            match &mut user.status {
-                UserStatus::Active(ActiveUser { sender }) => {
-                    let Ok(_) = sender.send(msg.0.clone()) else {
-                        log::error!("Failed to send message to user: {:?}", user.name);
-                        continue;
-                    };
-                }
-                UserStatus::Inactive(InactiveUser { messages }) => {
-                    messages.push(msg.0.clone());
-                }
+            if let UserStatus::Active(sender) = &user.status {
+                let Ok(_) = sender.send(ServerAction::Message(msg.0.clone())) else {
+                    log::error!("Failed to send message to user: {:?}", user.name);
+                    continue;
+                };
             }
+            user.messages.push(msg.0.clone());
         }
         Status::Ok
     } else {
@@ -94,32 +110,50 @@ pub async fn send_message(
 
 #[post("/create/<name>/<users..>")]
 pub async fn create_room(
-    name: String,
-    db: &State<ChatroomsDB>,
+    name: ChatRoomID,
+    chat_db: &State<ChatroomsDB>,
+    user_db: &State<UserDB>,
     users: PathBuf,
     user: JWT,
 ) -> Status {
-    let mut db = db.write().await;
-    if db.contains_key(&name) {
-        return Status::Conflict;
+    {
+        let mut cdb = chat_db.write().await;
+        if cdb.contains_key(&name) {
+            return Status::Conflict;
+        }
+
+        let udb = user_db.read().await;
+
+        // Make sure all the users are valid
+        let mut users: Vec<_> = users
+            .iter()
+            .map(|user| UserID(user.to_string_lossy().to_string()))
+            .filter(|user| udb.contains_key(user))
+            .collect();
+
+        if !users.contains(&user.name) {
+            users.push(user.name.clone());
+        }
+
+        if users.is_empty() {
+            return Status::NotFound;
+        }
+
+        cdb.insert(name.clone(), users);
     }
 
-    // Make sure all the users are valid
-    let mut users: Vec<_> = users
-        .iter()
-        .map(|user| UserID(user.to_string_lossy().to_string()))
-        .filter(|user| db.contains_key(&user.0))
-        .collect();
+    send_msg(
+        ChatMessage {
+            sender: "Server".into(),
+            room: name,
+            content: format!("{} created the room", user.name.0),
+            timestamp: jsonwebtoken::get_current_timestamp(),
+        },
+        chat_db,
+        user_db,
+    )
+    .await;
 
-    if !users.contains(&user.name) {
-        users.push(user.name);
-    }
-
-    if users.is_empty() {
-        return Status::NotFound;
-    }
-
-    db.insert(name, users);
     Status::Ok
 }
 
@@ -138,37 +172,32 @@ async fn get_auth(stream: &mut DuplexStream) -> Option<UserID> {
 }
 
 async fn send_msg(msg: ChatMessage, chat_db: &State<ChatroomsDB>, user_db: &State<UserDB>) {
-    let mut user_db = user_db.write().await;
-    let db = chat_db.read().await;
-    let Some(room) = db.get(&msg.room.0) else {
-        log::error!("Room not found: {:?}", msg.room);
-        return;
-    };
-    for user in room {
+  let db = chat_db.read().await;
+  let Some(room) = db.get(&msg.room) else {
+    log::error!("Room not found: {:?}", msg.room);
+    return;
+  };
+  let mut user_db = user_db.write().await;
+  for user in room {
         let Some(user) = user_db.get_mut(user) else {
             log::error!("User not found: {:?}", user);
             continue;
         };
 
-        match &mut user.status {
-            UserStatus::Active(ActiveUser { sender }) => {
-                let Ok(_) = sender.send(msg.clone()) else {
-                    log::error!("Failed to send message to user: {:?}", user.name);
-                    continue;
-                };
-            }
-            UserStatus::Inactive(InactiveUser { messages }) => {
-                messages.push(msg.clone());
-            }
+        if let UserStatus::Active(sender) = &user.status {
+            let Ok(_) = sender.send(ServerAction::Message(msg.clone())) else {
+                log::error!("Failed to send message to user: {:?}", user.name);
+                continue;
+            };
         }
+
+        user.messages.push(msg.clone());
     }
 }
 
 async fn handle_user_close(id: UserID, user_db: &State<UserDB>) {
     if let Some(user) = user_db.write().await.get_mut(&id) {
-        user.status = UserStatus::Inactive(InactiveUser {
-            messages: Vec::new(),
-        });
+        user.status = UserStatus::Inactive;
         log::info!("User disconnected: {:?}", id);
     }
 }
@@ -191,21 +220,25 @@ async fn handle_connection(
             let _ = stream.send(Message::Close(None)).await;
             return Ok(());
         };
-        let chat = match &mut user.status {
-            UserStatus::Active(_) => {
-                let _ = stream.send(Message::Close(None)).await;
-                log::error!("User already connected: {:?}", id);
-                return Ok(());
-            }
-            UserStatus::Inactive(chat) => &mut chat.messages,
-        };
+        if let UserStatus::Active(_) = &user.status {
+            let _ = stream.send(Message::Close(None)).await;
+            log::error!("User already connected: {:?}", id);
+            return Ok(());
+        }
         let (tx, rx) = rocket::tokio::sync::broadcast::channel(16);
-        let out = std::mem::take(chat);
-        user.status = UserStatus::Active(ActiveUser { sender: tx });
-        (rx, out)
+        user.status = UserStatus::Active(tx);
+        (rx, user.messages.clone())
     };
 
+    for room in chat_db.read().await.iter().filter_map(|f| f.1.contains(&id).then_some(f.0)) {
+        let msg = ServerAction::Join((room.clone(), id.clone()));
+        let _ = stream
+            .send(Message::binary(serde_json::to_vec(&msg).unwrap()))
+            .await;
+    }
+
     for msg in chat {
+        let msg = ServerAction::Message(msg);
         let _ = stream
             .send(Message::binary(serde_json::to_vec(&msg).unwrap()))
             .await;
@@ -252,7 +285,7 @@ async fn handle_user_message(
         return false;
     }
     let data = msg.into_data();
-    let Ok(msg) = serde_json::from_slice::<Action>(&data) else {
+    let Ok(msg) = serde_json::from_slice::<UserAction>(&data) else {
         log::error!(
             "Failed to parse message: {:?}",
             String::from_utf8_lossy(&data)
@@ -261,7 +294,7 @@ async fn handle_user_message(
     };
     log::info!("Received message: {:?}", msg);
     match msg {
-        Action::Message(msg) => send_msg(msg, chat_db, user_db).await,
+        UserAction::Message(msg) => send_msg(msg, chat_db, user_db).await,
         _ => {}
     }
     false

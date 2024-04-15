@@ -1,5 +1,5 @@
 use rocket::{
-    request::{FromRequest, Outcome},
+    request::{FromParam, FromRequest, Outcome},
     tokio::sync::broadcast::Sender,
     Request,
 };
@@ -10,28 +10,30 @@ use crate::UserDB;
 pub struct User {
     pub name: UserID,
     pub status: UserStatus,
+    // Messages to this user, sent on reconnect
+    pub messages: Vec<ChatMessage>,
     // Hashed password
     pub password: String,
 }
 
 pub enum UserStatus {
-    Active(ActiveUser),
-    Inactive(InactiveUser),
-}
-
-pub struct ActiveUser {
-    pub sender: Sender<ChatMessage>,
-}
-pub struct InactiveUser {
-    pub messages: Vec<ChatMessage>,
+    Active(Sender<ServerAction>),
+    Inactive,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone)]
 pub struct UserID(pub(crate) String);
 
-impl From<String> for UserID {
-    fn from(s: String) -> Self {
-        UserID(s)
+impl<T: std::fmt::Display> From<T> for UserID {
+    fn from(s: T) -> Self {
+        UserID(s.to_string())
+    }
+}
+
+impl<'r> FromParam<'r> for UserID {
+    type Error = &'static str;
+    fn from_param(param: &'r str) -> Result<Self, Self::Error> {
+        Ok(UserID(param.to_string()))
     }
 }
 
@@ -65,6 +67,13 @@ pub struct MessageID(pub(crate) usize);
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone)]
 pub struct ChatRoomID(pub(crate) String);
 
+impl<'r> FromParam<'r> for ChatRoomID {
+  type Error = &'static str;
+  fn from_param(param: &'r str) -> Result<Self, Self::Error> {
+      Ok(ChatRoomID(param.to_string()))
+  }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct ChatMessage {
     pub sender: UserID,
@@ -75,7 +84,7 @@ pub struct ChatMessage {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(tag = "action", content = "data")]
-pub enum Action {
+pub enum UserAction {
     Message(ChatMessage),
     Join(ChatRoomID),
     Leave(ChatRoomID),
@@ -83,6 +92,14 @@ pub enum Action {
     Remove((ChatRoomID, UserID)),
     Create(ChatRoomID),
     Delete(ChatRoomID),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[serde(tag = "action", content = "data")]
+pub enum ServerAction {
+    Message(ChatMessage),
+    Join((ChatRoomID, UserID)),
+    Leave((ChatRoomID, UserID)),
 }
 
 // impl From<ChatMessage> for Vec<u8> {
@@ -95,18 +112,4 @@ impl std::fmt::Display for ChatMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.content)
     }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct ChatRoom {
-    pub name: ChatRoomID,
-    pub participants: Vec<UserID>,
-    pub content: Vec<ChatMessage>,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct UserData {
-    pub name: UserID,
-    pub rooms: Vec<ChatRoomID>,
-    pub active: Option<ChatRoomID>,
 }

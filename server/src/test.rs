@@ -1,8 +1,8 @@
-use crate::types::{Action, ChatMessage, ChatRoomID, UserID};
+use crate::types::{ChatMessage, ChatRoomID, ServerAction, UserAction, UserID};
 
 #[test]
 fn what_is_the_json() {
-    let action = Action::Message(ChatMessage {
+    let action = UserAction::Message(ChatMessage {
         sender: UserID("What".into()),
         room: ChatRoomID("Is".into()),
         content: "The JSON".into(),
@@ -11,7 +11,7 @@ fn what_is_the_json() {
     let json = serde_json::to_string(&action).unwrap();
     println!("{}", json);
 
-    let action = Action::Add((ChatRoomID("The".into()), UserID("JSON".into())));
+    let action = ServerAction::Join((ChatRoomID("The".into()), UserID("JSON".into())));
     let json = serde_json::to_string(&action).unwrap();
     println!("{}", json);
 }

@@ -1,6 +1,6 @@
 use jsonwebtoken::Algorithm;
 use rocket::{form::Form, http::Status, request::{FromRequest, Outcome}, Request};
-use crate::{types::{InactiveUser, User, UserStatus}, UserDB, UserID};
+use crate::{types::{User, UserStatus}, UserDB, UserID};
 use rocket::State;
 
 const HASH_COST: u32 = 12;
@@ -79,10 +79,9 @@ pub async fn create_user(form: Form<Credentials<'_>>, db: &State<UserDB>) -> (St
         id.clone(),
         User {
             name: id,
+            messages: vec![],
             password: hashed,
-            status: UserStatus::Inactive(InactiveUser {
-                messages: Vec::new(),
-            }),    
+            status: UserStatus::Inactive,    
         },    
     );    
     (Status::Ok, Some(encode_jwt(name, secret)))

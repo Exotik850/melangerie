@@ -10,13 +10,13 @@ const FILE_PATH: &str = "./public";
 type LockedMap<K, V> = RwLock<HashMap<K, V>>;
 type LockedSet<T> = RwLock<HashSet<T>>;
 use std::collections::{HashMap, HashSet};
-type ChatroomsDB = LockedMap<String, Vec<UserID>>;
+type ChatroomsDB = LockedMap<ChatRoomID, Vec<UserID>>;
 // Map Users to their sender which is sending to their active websocket connection
 // and a Vec of messages that have been sent to them while they were offline
 type UserDB = LockedMap<UserID, User>;
 use rocket::{fs::NamedFile, tokio::sync::RwLock};
 use std::path::PathBuf;
-use types::{User, UserID};
+use types::{ChatRoomID, User, UserID};
 
 #[get("/<file..>")]
 async fn file_server(file: PathBuf) -> std::io::Result<NamedFile> {
