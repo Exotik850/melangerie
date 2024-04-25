@@ -45,6 +45,7 @@
 
 <div class="backdrop" id="vanta">
   <div class="modal">
+    <h2>{isLogin ? "Login" : "Create an Account"}</h2>
     <div class="add-username">
       <form on:submit|preventDefault={handleSubmit}>
         <input
@@ -57,7 +58,9 @@
           type="password"
           placeholder="Enter your password here"
           bind:value={password}
-        /> <button type="submit">{isLogin ? "Login" : "Sign Up"}</button>
+        />
+        <br/>
+        <button type="submit">{isLogin ? "Login" : "Sign Up"}</button>
         {#if isLoading}
           <small>Loading...</small>
         {/if}
@@ -70,9 +73,6 @@
         {#if hasWhiteSpace}
           <small>Invalid username. Must not contain any spaces.</small>
         {/if}
-        {#if !hasError && !isLoading && !hasWhiteSpace && !isLogin}
-          <small>Your username will expire after <span>24 hrs.</span></small>
-        {/if}
         <button type="button" on:click={toggleMode}>
           {isLogin ? "Create an account" : "Login to an existing account"}
         </button>
@@ -82,6 +82,18 @@
 </div>
 
 <style lang="scss">
+  .modal {
+    background-color: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin: auto;
+    box-shadow: 0px 5px #3ecf8e;
+    transition: all ease 0.1s;
+    h2 {
+      text-align: center;
+      color: #3ecf8e;
+    }
+  }
   .backdrop {
     width: 100%;
     height: 100%;
@@ -121,17 +133,13 @@
       margin-bottom: 10px;
       box-shadow: 0px 5px #3ecf8e;
       transition: all ease 0.1s;
+      background-color: rgb(217, 217, 217);
 
       &:focus {
         outline: none;
         box-shadow: 0px 10px #3ecf8e;
         margin-bottom: 20px;
       }
-    }
-
-    span {
-      color: #3ecf8e;
-      font-weight: 600;
     }
   }
 </style>

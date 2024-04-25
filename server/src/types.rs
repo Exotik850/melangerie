@@ -11,7 +11,7 @@ pub struct User {
     pub name: UserID,
     pub status: UserStatus,
     // Messages to this user, sent on reconnect
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<ServerAction>,
     // Hashed password
     pub password: String,
 }
@@ -86,20 +86,30 @@ pub struct ChatMessage {
 #[serde(tag = "action", content = "data")]
 pub enum UserAction {
     Message(ChatMessage),
-    Join(ChatRoomID),
+    Report(String),
     Leave(ChatRoomID),
     Add((ChatRoomID, UserID)),
-    Remove((ChatRoomID, UserID)),
-    Create(ChatRoomID),
-    Delete(ChatRoomID),
+    ListUsers,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(tag = "action", content = "data")]
 pub enum ServerAction {
     Message(ChatMessage),
-    Join((ChatRoomID, UserID)),
+    Add {
+      room: ChatRoomID,
+      adder: Option<UserID>,
+      added: UserID,
+    },
+    List(Vec<UserID>),
     Leave((ChatRoomID, UserID)),
+    Error(String),
+}
+
+impl From<ChatMessage> for ServerAction {
+    fn from(msg: ChatMessage) -> Self {
+        ServerAction::Message(msg)
+    }
 }
 
 // impl From<ChatMessage> for Vec<u8> {

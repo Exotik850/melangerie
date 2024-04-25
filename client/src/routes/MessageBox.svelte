@@ -1,17 +1,43 @@
 <script lang="ts">
   import { get } from "svelte/store";
-  import { messageStore, sendMessage, token_store, uname } from "$lib/stores";
+  import {
+    incomingMessages,
+    messageStore,
+    selectedRoom,
+    sendMessage,
+    usersStore,
+    token_store,
+    uname,
+  } from "$lib/stores";
   import { host } from "$lib";
+  import { toast } from "svelte-french-toast";
   let message = "";
-  export let selectedRoom = "";
   function addUser() {
-    const user = prompt("Enter the username:");
-    if (user) {
-      fetch(host + `/chat/adduser/${selectedRoom}/${user}`, {
-        method: "POST",
-        headers: { authorization: get(token_store) },
-      });
-    }
+    // Open a modal to select from available users
+    sendMessage({ action: "ListUsers" });
+    // delay for 100 ms
+
+    setTimeout(() => {
+      console.log("Users: ", $usersStore);
+      const users = $usersStore.filter((user) => user !== $uname);
+      if (users.length === 0) {
+        toast.error("No users found!");
+        return;
+      }
+      let user = prompt(
+        "Enter the username to add to this room\n\
+    Available Users: " + users.join(",\n")
+      );
+
+      if (user && $selectedRoom && $incomingMessages.socket) {
+        $incomingMessages.socket.send(
+          JSON.stringify({
+            action: "Add",
+            data: [$selectedRoom, user],
+          })
+        );
+      }
+    }, 100);
   }
 
   let formSubmit: HTMLFormElement;
@@ -21,7 +47,7 @@
       action: "Message",
       data: {
         sender: $uname,
-        room: selectedRoom,
+        room: $selectedRoom,
         content: message,
         timestamp: Date.now(),
       },
@@ -32,15 +58,15 @@
 </script>
 
 <div class="chat-window">
-  {#if selectedRoom}
+  {#if $selectedRoom}
     <div class="chat-header">
-      <h2>{selectedRoom}</h2>
+      <h2>{$selectedRoom}</h2>
       <!-- Add user to this room -->
       <button on:click={addUser}>Add User</button>
     </div>
     <ul class="message-list">
-      {#if $messageStore[selectedRoom]}
-        {#each $messageStore[selectedRoom] as message}
+      {#if $messageStore[$selectedRoom]}
+        {#each $messageStore[$selectedRoom] as message}
           <li><strong>{message.sender}:</strong> {message.content}</li>
         {/each}
       {/if}

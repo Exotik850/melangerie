@@ -1,6 +1,7 @@
 import { browser } from "$app/environment";
 import { checkUser, host } from "$lib";
 import { writable, get, derived } from "svelte/store";
+import { toast } from "svelte-french-toast";
 
 let access_token: null | string = null;
 export const token_store = writable("");
@@ -8,10 +9,9 @@ export let uname = derived(token_store, (token) => {
   if (!token) return "";
   return JSON.parse(atob(token.split(".")[1])).name;
 });
-token_store.subscribe((val) => {
-  console.log("Token store updated", val);
-});
 export const messageStore = writable<Record<string, Message[]>>({});
+export const selectedRoom = writable<string | null>(null);
+export const usersStore = writable<string[]>([]);
 
 // function get_token() {
 //   let token = localStorage.getItem("OCTOKEN") || null;
@@ -23,7 +23,7 @@ type State = {
 };
 type Payload = {
   action: string;
-  data: any;
+  data?: any;
 };
 type Message = {
   sender?: string;
@@ -31,6 +31,13 @@ type Message = {
   content: string;
   timestamp: number;
 };
+type Added = {
+  room: string;
+  adder?: string;
+  added: string;
+  timestamp: number;
+}
+
 // Create a new store with the given data.
 export const incomingMessages = writable<State>({});
 export const connect = (url: URL) => {
@@ -48,6 +55,7 @@ export const connect = (url: URL) => {
   };
   ws.onclose = () => {
     console.log("Connection closed");
+    toast.error("Connection closed");
   };
   // ws.send(token);
   ws.addEventListener("message", async (message: any) => {
@@ -63,28 +71,41 @@ export const connect = (url: URL) => {
 function handlePayload(payload: Payload) {
   switch (payload.action) {
     case "Message":
-      const room = payload.data.room;
+      const room = payload.data?.room;
       messageStore.update((state) => {
         state[room] = state[room] || [];
         state[room].push(payload.data);
+        if (get(selectedRoom) != room && payload.data?.timestamp > Date.now() - 1000 * 60 * 1 ){
+          toast.success(`${payload.data?.sender} sent a message in ${room}`);
+        }
         return state;
       });
       break;
-    case "Join":
-      const [roomName, user] = payload.data;
+    case "Added":
+      if (!payload.data) return;
+      const { room: roomName, added, adder, timestamp } = payload.data;
       messageStore.update((state) => {
         state[roomName] = state[roomName] || [];
-        if (user === get(uname)) {
-          return state;
+        let content;
+        if (adder) {
+          content = `${adder} added ${added} to the room`;
+        } else {
+          content = `${added} joined the room`;
         }
         state[roomName].push({
           sender: "Server",
-          content: `${user} joined the room`,
-          timestamp: Date.now(),
+          content: content,
+          timestamp: timestamp,
         });
+        if (get(selectedRoom) != roomName) {
+          toast.success(`${user} joined ${roomName}`);
+        }
         return state;
       });
-
+    case "List":
+      if (!payload.data) return;
+      usersStore.set(payload.data);
+      break;
     default:
       break;
   }
@@ -97,19 +118,4 @@ export const sendMessage = (message: Payload) => {
   } else {
     console.log("No socket connection");
   }
-};
-
-export const listRooms = async () => {
-  let token = get(token_store);
-  if (!token) {
-    console.log("No token found");
-    return;
-  }
-  let res = await fetch(host + "/chat/list", {
-    headers: {
-      authorization: token,
-    },
-  });
-  let data = await res.json();
-  return data;
 };

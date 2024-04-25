@@ -80,10 +80,10 @@ pub async fn create_user(
     if db.contains_key(&id) {
         return (Status::Conflict, None);
     }
-    let Ok(hashed) = bcrypt::hash(password, HASH_COST) else {
-        return (Status::InternalServerError, None);
-    };
-    let Ok(secret) = std::env::var("JWT_SECRET") else {
+    let (Ok(secret), Ok(hashed)) = (
+        std::env::var("JWT_SECRET"),
+        bcrypt::hash(password, HASH_COST),
+    ) else {
         return (Status::InternalServerError, None);
     };
     // Insert the user into the database

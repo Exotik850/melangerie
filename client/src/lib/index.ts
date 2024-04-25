@@ -17,6 +17,7 @@ export async function createUser(
   name: string,
   password: string
 ): string | null {
+  if (!name || !password) return null;
   let res = await fetch(host + "/auth/createuser", {
     method: "POST",
     headers: {

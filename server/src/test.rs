@@ -11,7 +11,7 @@ fn what_is_the_json() {
     let json = serde_json::to_string(&action).unwrap();
     println!("{}", json);
 
-    let action = ServerAction::Join((ChatRoomID("The".into()), UserID("JSON".into())));
-    let json = serde_json::to_string(&action).unwrap();
-    println!("{}", json);
+    // let action = ServerAction::Join((ChatRoomID("The".into()), UserID("JSON".into())));
+    // let json = serde_json::to_string(&action).unwrap();
+    // println!("{}", json);
 }
