@@ -26,11 +26,22 @@ impl Log {
     }
 }
 
+use rocket::tokio::runtime::{Runtime, Handle};
+
+fn get_runtime_handle() -> (Handle, Option<Runtime>) {
+    match Handle::try_current() {
+        Ok(h) => (h, None),
+        Err(_) => {
+              let rt = Runtime::new().expect("Failed to create runtime");
+              (rt.handle().clone(), Some(rt))
+            }
+    }
+}
+
 impl Drop for Log {
     fn drop(&mut self) {
-      rocket::tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let _ = self.flush().await;
-      });
+      let (handle, _) = get_runtime_handle();
+      let _ = handle.block_on(self.flush());
     }
 }
 
