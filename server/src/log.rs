@@ -40,8 +40,11 @@ fn get_runtime_handle() -> (Handle, Option<Runtime>) {
 
 impl Drop for Log {
     fn drop(&mut self) {
-      let (handle, _) = get_runtime_handle();
-      let _ = handle.block_on(self.flush());
+      let (_, rt) = get_runtime_handle();
+      let Some(rt) = rt else {
+        return;
+      };
+      let _ = rt.block_on(self.flush());
     }
 }
 
