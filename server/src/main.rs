@@ -45,13 +45,22 @@ async fn report(info: Json<ReportInfo>, log: &State<Log>) -> Status {
   }
 }
 
+async fn periodic_flush(log: Log) {
+  loop {
+    rocket::tokio::time::sleep(rocket::tokio::time::Duration::from_secs(5)).await;
+    log.flush().await.unwrap();
+  }
+}
+
 #[launch]
-fn rocket() -> _ {
+async fn rocket() -> _ {
     dotenvy::dotenv().ok();
+    let log = Log::new().unwrap();
+    rocket::tokio::spawn(periodic_flush(log.clone()));
     rocket::build()
         .manage(UserDB::default())
         .manage(ChatroomsDB::default())
-        .manage(log::Log::new().unwrap())
+        .manage(log)
         .attach(cors::Cors)
         .mount(
             "/chat",
