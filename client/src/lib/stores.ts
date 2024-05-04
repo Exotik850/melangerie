@@ -12,6 +12,7 @@ export let uname = derived(token_store, (token) => {
 export const messageStore = writable<Record<string, Message[]>>({});
 export const selectedRoom = writable<string | null>(null);
 export const usersStore = writable<string[]>([]);
+export const tabHidden = writable(false);
 
 // function get_token() {
 //   let token = localStorage.getItem("OCTOKEN") || null;
@@ -60,6 +61,12 @@ export const connect = (url: URL) => {
   // ws.send(token);
   ws.addEventListener("message", async (message: any) => {
     console.log("Received:", message.data);
+    if (get(tabHidden)) {
+      // play sound
+      let audio = new Audio("/notification.mp3");
+      console.log("Playing sound")
+      audio.play();
+    }
     const data: Payload = JSON.parse(await message.data.text());
     handlePayload(data);
   });
