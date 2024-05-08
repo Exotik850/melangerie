@@ -1,4 +1,4 @@
-use crate::types::{ChatMessage, ChatRoomID, ServerAction, UserAction, UserID};
+use crate::types::{ChatMessage, ChatRoomID, UserAction, UserID};
 
 #[test]
 fn what_is_the_json() {

@@ -41,17 +41,16 @@ pub async fn list_rooms(chat_db: &State<ChatroomsDB>, user: Jwt) -> Json<Vec<Str
 async fn add_user(
     user_id: UserID,
     room: ChatRoomID,
-    user_db: &State<UserDB>,
-    chat_db: &State<ChatroomsDB>,
+    user_db: &UserDB,
+    chat_db: &ChatroomsDB,
 ) -> bool {
-  
-  let mut cdb = chat_db.write().await;
+    let mut cdb = chat_db.write().await;
     // Check if the room exists
     let Some(users) = cdb.get_mut(&room) else {
-      log::error!("Room not found: {:?}", room);
-      return false;
+        log::error!("Room not found: {:?}", room);
+        return false;
     };
-    
+
     let udb = user_db.read().await;
     // Check if the user exists
     let Some(_) = udb.get(&user_id) else {
@@ -78,7 +77,7 @@ pub async fn add_user_to_room(
     auth_user: Jwt,
 ) -> Status {
     if !add_user(user_id.clone(), room.clone(), user_db, chat_db).await {
-      return Status::NotFound;
+        return Status::NotFound;
     };
     send_msg(
         ChatMessage {
@@ -188,7 +187,7 @@ async fn get_auth(stream: &mut DuplexStream) -> Option<UserID> {
     Some(token.name)
 }
 
-async fn send_msg(msg: ChatMessage, chat_db: &State<ChatroomsDB>, user_db: &State<UserDB>) {
+async fn send_msg(msg: ChatMessage, chat_db: &ChatroomsDB, user_db: &UserDB) {
     let db = chat_db.read().await;
     let Some(room) = db.get(&msg.room) else {
         log::error!("Room not found: {:?}", msg.room);
@@ -213,7 +212,7 @@ async fn send_msg(msg: ChatMessage, chat_db: &State<ChatroomsDB>, user_db: &Stat
     }
 }
 
-async fn send_action(action: ServerAction, user_db: &State<UserDB>, id: &UserID) {
+async fn send_action(action: ServerAction, user_db: &UserDB, id: &UserID) {
     let mut user_db = user_db.write().await;
     let Some(user) = user_db.get_mut(id) else {
         log::error!("User not found: {:?}", id);
@@ -319,9 +318,9 @@ async fn handle_connection(
 async fn handle_user_message(
     msg: ws::Message,
     id: &UserID,
-    chat_db: &State<ChatroomsDB>,
-    user_db: &State<UserDB>,
-    log: &State<Log>,
+    chat_db: &ChatroomsDB,
+    user_db: &UserDB,
+    log: &Log,
 ) -> bool {
     if let Message::Close(_) = msg {
         return true;
@@ -345,18 +344,18 @@ async fn handle_user_message(
         }
         UserAction::Leave(room) => {
             {
-              let mut cdb = chat_db.write().await;
-              let Some(users) = cdb.get_mut(&room) else {
-                  log::error!("Room not found: {:?}", room);
-                  return false;
-              };
-              users.retain(|user| user != id);
+                let mut cdb = chat_db.write().await;
+                let Some(users) = cdb.get_mut(&room) else {
+                    log::error!("Room not found: {:?}", room);
+                    return false;
+                };
+                users.retain(|user| user != id);
 
-              let mut udb = user_db.write().await;
-              if let Some(user) = udb.get_mut(id) {
-                user.messages.retain(|action| action.room() != Some(&room));
-              }
-          }
+                let mut udb = user_db.write().await;
+                if let Some(user) = udb.get_mut(id) {
+                    user.messages.retain(|action| action.room() != Some(&room));
+                }
+            }
             send_msg(
                 ChatMessage {
                     sender: "Server".into(),
@@ -371,7 +370,7 @@ async fn handle_user_message(
         }
         UserAction::Add((room, user)) => {
             if !add_user(user.clone(), room.clone(), user_db, chat_db).await {
-              return false;
+                return false;
             }
             send_msg(
                 ChatMessage {
@@ -387,9 +386,17 @@ async fn handle_user_message(
         }
         UserAction::ListUsers => {
             let user: Vec<_> = user_db.read().await.keys().cloned().collect();
-            send_action(ServerAction::List(user), user_db, &id).await;
+            send_action(ServerAction::List(user), user_db, id).await;
         }
-        _ => {}
+        UserAction::TimeIn(note) => {
+            let _ = log.write(format!("Time in: {:?}", note)).await;
+        }
+        UserAction::TimeOut(note) => {
+            let _ = log.write(format!("Time out: {:?}", note)).await;
+        }
+        _ => {
+            log::error!("Invalid action: {:?}", msg);
+        }
     }
     false
 }

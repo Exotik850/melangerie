@@ -1,7 +1,9 @@
 mod auth;
 mod chat;
-mod log;
 mod cors;
+mod log;
+mod timing;
+use timing::TimeState;
 #[cfg(test)]
 mod test;
 mod types;
@@ -21,6 +23,17 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use types::{ChatRoomID, User, UserID};
 
+use rocket::tokio::runtime::{Handle, Runtime};
+pub fn get_runtime_handle() -> (Handle, Option<Runtime>) {
+    match Handle::try_current() {
+        Ok(h) => (h, None),
+        Err(_) => {
+            let rt = Runtime::new().expect("Failed to create runtime");
+            (rt.handle().clone(), Some(rt))
+        }
+    }
+}
+
 #[get("/<file..>")]
 async fn file_server(file: PathBuf) -> std::io::Result<NamedFile> {
     let path = if file.to_str().map_or(false, str::is_empty) {
@@ -33,23 +46,26 @@ async fn file_server(file: PathBuf) -> std::io::Result<NamedFile> {
 
 #[derive(Deserialize)]
 struct ReportInfo {
-  name: String,
-  issue: String,
+    name: String,
+    issue: String,
 }
 
-#[post("/report", data="<info>")]
+#[post("/report", data = "<info>")]
 async fn report(info: Json<ReportInfo>, log: &State<Log>) -> Status {
-  match log.write(format!("Report: {} - {}", info.name, info.issue)).await {
-    Ok(_) => Status::Ok,
-    Err(_) => Status::InternalServerError
-  }
+    match log
+        .write(format!("Report: {} - {}", info.name, info.issue))
+        .await
+    {
+        Ok(_) => Status::Ok,
+        Err(_) => Status::InternalServerError,
+    }
 }
 
 async fn periodic_flush(log: Log) {
-  loop {
-    rocket::tokio::time::sleep(rocket::tokio::time::Duration::from_secs(5)).await;
-    log.flush().await.unwrap();
-  }
+    loop {
+        rocket::tokio::time::sleep(rocket::tokio::time::Duration::from_secs(5)).await;
+        log.flush().await.unwrap();
+    }
 }
 
 #[launch]
@@ -61,6 +77,7 @@ async fn rocket() -> _ {
         .manage(UserDB::default())
         .manage(ChatroomsDB::default())
         .manage(log)
+        .manage(TimeState::new())
         .attach(cors::Cors)
         .mount(
             "/chat",

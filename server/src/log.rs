@@ -1,5 +1,9 @@
+use rocket::tokio::{
+    fs::File,
+    io::{AsyncWriteExt, BufWriter, Result},
+    sync::RwLock,
+};
 use std::sync::Arc;
-use rocket::tokio::{fs::File, io::{AsyncWriteExt, BufWriter, Result}, sync::RwLock};
 
 #[derive(Clone)]
 pub struct Log {
@@ -29,26 +33,14 @@ impl Log {
     }
 }
 
-use rocket::tokio::runtime::{Runtime, Handle};
-
-fn get_runtime_handle() -> (Handle, Option<Runtime>) {
-    match Handle::try_current() {
-        Ok(h) => (h, None),
-        Err(_) => {
-              let rt = Runtime::new().expect("Failed to create runtime");
-              (rt.handle().clone(), Some(rt))
-            }
-    }
-}
-
 impl Drop for Log {
     fn drop(&mut self) {
-      let (h, _) = get_runtime_handle();
-      let file = self.file.clone();
-      let _ = h.spawn(async move {
-        let mut file = file.write().await;
-        let _ = file.flush().await;
-      });
+        let (h, _) = crate::get_runtime_handle();
+        let file = self.file.clone();
+        let _ = h.spawn(async move {
+            let mut file = file.write().await;
+            let _ = file.flush().await;
+        });
     }
 }
 

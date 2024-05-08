@@ -90,6 +90,8 @@ pub enum UserAction {
     Leave(ChatRoomID),
     Add((ChatRoomID, UserID)),
     ListUsers,
+    TimeIn(Option<String>),
+    TimeOut(Option<String>),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -97,9 +99,9 @@ pub enum UserAction {
 pub enum ServerAction {
     Message(ChatMessage),
     Add {
-      room: ChatRoomID,
-      adder: Option<UserID>,
-      added: UserID,
+        room: ChatRoomID,
+        adder: Option<UserID>,
+        added: UserID,
     },
     List(Vec<UserID>),
     Leave((ChatRoomID, UserID)),
@@ -107,14 +109,14 @@ pub enum ServerAction {
 }
 
 impl ServerAction {
-  pub fn room(&self) -> Option<&ChatRoomID> {
-    match self {
-      ServerAction::Message(msg) => Some(&msg.room),
-      ServerAction::Add { room, .. } => Some(room),
-      ServerAction::Leave((room, _)) => Some(room),
-      _ => None,
+    pub fn room(&self) -> Option<&ChatRoomID> {
+        match self {
+            ServerAction::Message(msg) => Some(&msg.room),
+            ServerAction::Add { room, .. } => Some(room),
+            ServerAction::Leave((room, _)) => Some(room),
+            _ => None,
+        }
     }
-  }
 }
 
 impl From<ChatMessage> for ServerAction {
