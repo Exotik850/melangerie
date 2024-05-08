@@ -344,11 +344,19 @@ async fn handle_user_message(
             let _ = log.write(format!("Report: {}", msg)).await;
         }
         UserAction::Leave(room) => {
-            let mut cdb = chat_db.write().await;
-            let Some(users) = cdb.get_mut(&room) else {
-                return false;
-            };
-            users.retain(|user| user != id);
+            {
+              let mut cdb = chat_db.write().await;
+              let Some(users) = cdb.get_mut(&room) else {
+                  log::error!("Room not found: {:?}", room);
+                  return false;
+              };
+              users.retain(|user| user != id);
+
+              let mut udb = user_db.write().await;
+              if let Some(user) = udb.get_mut(id) {
+                user.messages.retain(|action| action.room() != Some(&room));
+              }
+          }
             send_msg(
                 ChatMessage {
                     sender: "Server".into(),

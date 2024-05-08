@@ -106,6 +106,17 @@ pub enum ServerAction {
     Error(String),
 }
 
+impl ServerAction {
+  pub fn room(&self) -> Option<&ChatRoomID> {
+    match self {
+      ServerAction::Message(msg) => Some(&msg.room),
+      ServerAction::Add { room, .. } => Some(room),
+      ServerAction::Leave((room, _)) => Some(room),
+      _ => None,
+    }
+  }
+}
+
 impl From<ChatMessage> for ServerAction {
     fn from(msg: ChatMessage) -> Self {
         ServerAction::Message(msg)
