@@ -76,12 +76,11 @@
       {/each}
     </ul>
 
-    <div class = "bottombar"> 
+    <div class="bottombar">
       <!-- Button to report issues -->
       <button on:click={sendReport}>Report Issue</button>
       <button on:click={() => (window.location.href = "/")}>Logout</button>
     </div>
-
   </div>
   <MessageBox />
 </div>

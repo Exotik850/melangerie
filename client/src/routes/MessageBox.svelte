@@ -11,6 +11,7 @@
   } from "$lib/stores";
   import { host } from "$lib";
   import { toast } from "svelte-french-toast";
+  import { tick } from "svelte";
   let message = "";
   function addUser() {
     // Open a modal to select from available users
@@ -27,7 +28,7 @@
     }, 100);
   }
   let textInput: HTMLInputElement;
-  function sendMessageFromUser() {
+  async function sendMessageFromUser() {
     sendMessage({
       action: "Message",
       data: {
@@ -38,6 +39,7 @@
       },
     });
     message = "";
+    await tick();
     textInput.focus();
   }
   let selectingUser = false;
@@ -58,18 +60,20 @@
   }
 </script>
 
-<SelectUser callback={(user) => {
-  selectingUser = false;
-  if (user && $selectedRoom && $incomingMessages.socket) {
-    $incomingMessages.socket.send(
-      JSON.stringify({
-        action: "Add",
-        data: [$selectedRoom, user],
-      })
-    );
-  }
-}} bind:open={selectingUser} />
-
+<SelectUser
+  callback={(user) => {
+    selectingUser = false;
+    if (user && $selectedRoom && $incomingMessages.socket) {
+      $incomingMessages.socket.send(
+        JSON.stringify({
+          action: "Add",
+          data: [$selectedRoom, user],
+        })
+      );
+    }
+  }}
+  bind:open={selectingUser}
+/>
 
 <div class="chat-window">
   {#if $selectedRoom}
@@ -89,7 +93,12 @@
       {/if}
     </ul>
     <form class="message-input">
-      <input type="text" bind:this={textInput} bind:value={message} placeholder="Type a message..." />
+      <input
+        type="text"
+        bind:this={textInput}
+        bind:value={message}
+        placeholder="Type a message..."
+      />
       <button on:click={sendMessageFromUser} type="submit"> Send </button>
     </form>
   {:else}
