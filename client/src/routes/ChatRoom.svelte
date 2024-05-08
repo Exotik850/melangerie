@@ -12,7 +12,7 @@
   import { toast } from "svelte-french-toast";
   import { host, ip, type JWT } from "$lib";
   onMount(async () => {
-    window.onunload = () => {
+    window.onbeforeunload = () => {
       if ($incomingMessages.socket) {
         $incomingMessages.socket.close();
       }
