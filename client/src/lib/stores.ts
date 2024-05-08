@@ -13,7 +13,8 @@ export const messageStore = writable<Record<string, Message[]>>({});
 export const selectedRoom = writable<string | null>(null);
 export const usersStore = writable<string[]>([]);
 export const tabHidden = writable(false);
-const sound = new Audio("/notification.mp3");
+// let sound = new Audio("/notification.mp3");
+let sound: HTMLAudioElement | null = null;
 
 // function get_token() {
 //   let token = localStorage.getItem("OCTOKEN") || null;
@@ -65,6 +66,9 @@ export const connect = (url: URL) => {
     if (get(tabHidden)) {
       // play sound
       console.log("Playing sound")
+      if (!sound) {
+        sound = new Audio("/notification.mp3");
+      }
       sound.play();
     }
     const data: Payload = JSON.parse(await message.data.text());
