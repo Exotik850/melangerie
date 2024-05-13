@@ -34,6 +34,19 @@ pub fn get_runtime_handle() -> (Handle, Option<Runtime>) {
     }
 }
 
+
+use std::future::Future;
+pub fn run_or_block<F, T>(f: F) -> T
+where
+    F: Future<Output = T>,
+{
+    if let Ok(handle) = Handle::try_current() {
+        handle.block_on(f)
+    } else {
+        futures::executor::block_on(f)
+    }
+}
+
 #[get("/<file..>")]
 async fn file_server(file: PathBuf) -> std::io::Result<NamedFile> {
     let path = if file.to_str().map_or(false, str::is_empty) {
@@ -93,7 +106,7 @@ async fn rocket() -> _ {
             "/auth",
             routes![auth::create_user, auth::login_user, auth::check_user],
         )
-        .mount("/", routes![file_server, report])
+        .mount("/", routes![file_server, report, timing::get_time])
 
     // .register("/", catchers![echo_catcher])
 }

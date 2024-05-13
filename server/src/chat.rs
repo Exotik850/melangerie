@@ -1,4 +1,5 @@
 use crate::log::Log;
+use crate::timing::TimeState;
 use crate::types::{ChatRoomID, ServerAction, UserAction};
 use crate::{
     auth::{decode_jwt, Jwt},
@@ -19,11 +20,14 @@ pub async fn connect<'r>(
     ws: ws::WebSocket,
     user_db: &'r State<UserDB>,
     chat_db: &'r State<ChatroomsDB>,
-    shutdown: Shutdown,
+    time_db: &'r State<TimeState>,
     log: &'r State<Log>,
+    shutdown: Shutdown,
 ) -> ws::Channel<'r> {
     ws.channel(move |stream| {
-        Box::pin(async move { handle_connection(stream, shutdown, user_db, chat_db, log).await })
+        Box::pin(async move {
+            handle_connection(stream, shutdown, user_db, chat_db, time_db, log).await
+        })
     })
 }
 
@@ -229,7 +233,7 @@ async fn send_action(action: ServerAction, user_db: &UserDB, id: &UserID) {
     // user.messages.push(action);
 }
 
-async fn handle_user_close(id: UserID, user_db: &State<UserDB>) {
+async fn handle_user_close(id: UserID, user_db: &UserDB) {
     if let Some(user) = user_db.write().await.get_mut(&id) {
         user.status = UserStatus::Inactive;
         log::info!("User disconnected: {:?}", id);
@@ -239,9 +243,10 @@ async fn handle_user_close(id: UserID, user_db: &State<UserDB>) {
 async fn handle_connection(
     mut stream: DuplexStream,
     mut shutdown: Shutdown,
-    user_db: &State<UserDB>,
-    chat_db: &State<ChatroomsDB>,
-    log: &State<Log>,
+    user_db: &UserDB,
+    chat_db: &ChatroomsDB,
+    time_db: &TimeState,
+    log: &Log,
 ) -> ws::result::Result<()> {
     let Some(id) = get_auth(&mut stream).await else {
         let _ = stream.send(Message::Close(None)).await;
@@ -302,7 +307,7 @@ async fn handle_connection(
             },
             // A message has been received from the user
             sent_msg = stream.next() => if let Some(Ok(msg)) = sent_msg {
-                if handle_user_message(msg, &id, chat_db, user_db, log).await {
+                if handle_user_message(msg, &id, chat_db, user_db, time_db, log).await {
                     let _ = stream.send(Message::Close(None)).await;
                     handle_user_close(id, user_db).await;
                     break;
@@ -320,6 +325,7 @@ async fn handle_user_message(
     id: &UserID,
     chat_db: &ChatroomsDB,
     user_db: &UserDB,
+    time_db: &TimeState,
     log: &Log,
 ) -> bool {
     if let Message::Close(_) = msg {
@@ -389,14 +395,16 @@ async fn handle_user_message(
             send_action(ServerAction::List(user), user_db, id).await;
         }
         UserAction::TimeIn(note) => {
-            let _ = log.write(format!("Time in: {:?}", note)).await;
+            log::info!("{} Timed in: {:?}", id, note);
+            time_db.start(id.clone(), note).await;
         }
         UserAction::TimeOut(note) => {
-            let _ = log.write(format!("Time out: {:?}", note)).await;
+            log::info!("{} Timed out: {:?}", id, note);
+            time_db.stop(id.clone(), note).await;
         }
-        _ => {
-            log::error!("Invalid action: {:?}", msg);
-        }
+        // _ => {
+        //     log::error!("Invalid action: {:?}", msg);
+        // }
     }
     false
 }

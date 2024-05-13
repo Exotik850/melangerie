@@ -1,21 +1,98 @@
 use chrono::{DateTime, NaiveDate, Utc};
-use rocket::tokio::sync::RwLock;
+use rocket::{
+    data::{Data, FromData, Outcome},
+    form::FromFormField,
+    http::RawStr,
+    serde::json::Json,
+    tokio::{runtime::Handle, sync::RwLock},
+    Request, State,
+};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
-    sync::{atomic::AtomicU64, Arc},
+    collections::{BTreeMap, HashMap},
+    ops::Deref,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize},
+        Arc,
+    },
 };
 
-use crate::types::UserID;
+use chrono::NaiveDateTime;
+use chrono::NaiveTime;
+
+// https://stackoverflow.com/questions/25413201/how-do-i-implement-a-trait-i-dont-own-for-a-type-i-dont-own
+// https://github.com/SergioBenitez/Rocket/issues/602#issuecomment-380497269
+pub struct NaiveDateForm(NaiveDate);
+pub struct NaiveTimeForm(NaiveTime);
+pub struct NaiveDateTimeForm(NaiveDateTime);
+
+impl Deref for NaiveDateForm {
+    type Target = NaiveDate;
+    fn deref(&self) -> &NaiveDate {
+        &self.0
+    }
+}
+
+impl Deref for NaiveTimeForm {
+    type Target = NaiveTime;
+    fn deref(&self) -> &NaiveTime {
+        &self.0
+    }
+}
+
+impl Deref for NaiveDateTimeForm {
+    type Target = NaiveDateTime;
+    fn deref(&self) -> &NaiveDateTime {
+        &self.0
+    }
+}
+
+impl<'v> FromFormField<'v> for NaiveDateForm {
+    fn from_value(field: rocket::form::ValueField<'v>) -> rocket::form::Result<'v, Self> {
+        let date = NaiveDate::parse_from_str(field.value, "%Y-%m-%d")
+            .map_err(|_| rocket::form::Error::validation("Invalid Date, format: %Y-%m-%d"))?;
+        Ok(NaiveDateForm(date))
+    }
+}
+
+use crate::{auth::Jwt, types::UserID};
+
+#[get("/time?<start>&<end>")]
+pub async fn get_time(
+    user: Jwt,
+    start: Option<NaiveDateForm>,
+    end: Option<NaiveDateForm>,
+    time_state: &State<TimeState>,
+) -> Option<Json<Vec<TimeRange>>> {
+    let ts = time_state.data.read().await;
+    let user_timesheet = ts.get(&user.name)?;
+
+    if start.is_none() && end.is_none() {
+        let times = user_timesheet.completed.clone();
+        return Some(Json(times));
+    }
+
+    let start = start
+        .map(|date| date.0)
+        .unwrap_or_else(|| Utc::now().date_naive());
+    let end = end
+        .map(|date| date.0)
+        .unwrap_or_else(|| Utc::now().date_naive());
+
+    let times = user_timesheet.find_in_range(start, end).cloned().collect();
+
+    Some(Json(times))
+}
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct TimeState {
     #[serde(with = "arc_rw_serde")]
-    data: Arc<RwLock<HashMap<UserID, TimeSheet>>>,
-    id_counter: AtomicU64,
+    pub data: Arc<RwLock<HashMap<UserID, TimeSheet>>>,
+    id_counter: AtomicUsize,
 }
 
 mod arc_rw_serde {
+    use crate::run_or_block;
     use rocket::{
         serde::{Deserialize, Deserializer, Serialize, Serializer},
         tokio::sync::RwLock,
@@ -27,8 +104,7 @@ mod arc_rw_serde {
         T: Serialize,
         S: Serializer,
     {
-        let (h, _) = crate::get_runtime_handle();
-        let data = h.block_on(data.read());
+        let data = run_or_block(data.read());
         T::serialize(&data, serializer)
     }
 
@@ -60,17 +136,17 @@ impl TimeState {
         }
     }
 
-    pub async fn stop(&self, user: UserID, note: Option<String>) -> Option<u64> {
+    pub async fn stop(&self, user: UserID, note: Option<String>) -> Option<usize> {
         let mut data = self.data.write().await;
         let sheet = data.get_mut(&user)?;
-        let Some(current) = sheet.current.take() else {
+        let Some(start) = sheet.current.take() else {
             return None;
         };
         let id = self
             .id_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         sheet.completed.push(TimeRange {
-            start: current,
+            start,
             end: Timestamp {
                 time: Utc::now(),
                 note,
@@ -82,12 +158,16 @@ impl TimeState {
 }
 
 #[derive(Serialize, Deserialize)]
-struct TimeSheet {
+pub struct TimeSheet {
     completed: Vec<TimeRange>,
     current: Option<Timestamp>,
 }
 
 impl TimeSheet {
+    fn get(&self, id: usize) -> Option<&TimeRange> {
+        self.completed.iter().find(|range| range.id == id)
+    }
+
     fn total_hours(&self) -> f64 {
         let mut total = self.completed.iter().map(TimeRange::hours).sum();
         if let Some(current) = &self.current {
@@ -104,18 +184,21 @@ impl TimeSheet {
             .sum()
     }
 
-    fn hours_for_range(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> f64 {
-        self.completed
-            .iter()
-            .filter(|range| range.start.time >= start && range.end.time <= end)
-            .map(TimeRange::hours)
-            .sum()
+    pub fn find_in_range(
+        &self,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> impl Iterator<Item = &TimeRange> {
+        self.completed.iter().filter(move |range| {
+            let date = range.start.time.date_naive();
+            date >= start && date <= end
+        })
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct TimeRange {
-    id: u64,
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TimeRange {
+    id: usize,
     start: Timestamp,
     end: Timestamp,
 }
@@ -126,8 +209,8 @@ impl From<DateTime<Utc>> for Timestamp {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct Timestamp {
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Timestamp {
     time: DateTime<Utc>,
     note: Option<String>,
 }
