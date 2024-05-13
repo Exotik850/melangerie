@@ -41,24 +41,6 @@
   const joinRoom = (room: string) => {
     $selectedRoom = room;
   };
-
-  async function sendReport() {
-    let issue = prompt("Enter the issue you are facing:");
-    if (!$uname || !issue) {
-      toast.error("Cannot send an empty report!");
-      return;
-    }
-    let res = await fetch(host + `/report`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: $uname, issue }),
-    });
-    if (res.status === 200) {
-      toast.success("Issue reported successfully!");
-    } else {
-      toast.error("Failed to report issue! Please try again later.");
-    }
-  }
 </script>
 
 <div class="chat-container">
@@ -75,12 +57,6 @@
         <li><button on:click={() => joinRoom(room)}>{room}</button></li>
       {/each}
     </ul>
-
-    <div class="bottombar">
-      <!-- Button to report issues -->
-      <button on:click={sendReport}>Report Issue</button>
-      <button on:click={() => (window.location.href = "/")}>Logout</button>
-    </div>
   </div>
   <MessageBox />
 </div>

@@ -4,6 +4,7 @@
   import Modal from "../components/Modal.svelte";
   import toast, { Toaster } from "svelte-french-toast";
   import { onMount } from "svelte";
+  import Nav from "./Nav.svelte";
 
   onMount(() => {
     document.addEventListener("visibilitychange", () => {
@@ -15,6 +16,7 @@
 <main>
   <Toaster />
   {#if $token_store}
+    <Nav/>
     <ChatRoom />
   {:else}
     <Modal />
