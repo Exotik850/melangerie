@@ -21,12 +21,18 @@ pub enum UserStatus {
     Inactive,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone, Ord, PartialOrd)]
 pub struct UserID(pub(crate) String);
 
-impl<T: std::fmt::Display> From<T> for UserID {
-    fn from(s: T) -> Self {
-        UserID(s.to_string())
+impl<T: Into<String>> From<T> for UserID {
+    fn from(val: T) -> Self {
+        UserID(val.into())
+    }
+} 
+
+impl std::fmt::Display for UserID {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", &self.0)
     }
 }
 
