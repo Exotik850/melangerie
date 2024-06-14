@@ -3,11 +3,12 @@ use rocket::tokio::{
     io::{AsyncWriteExt, BufWriter, Result},
     sync::RwLock,
 };
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 
 #[derive(Clone)]
 pub struct Log {
     file: Arc<RwLock<BufWriter<File>>>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl Log {
@@ -17,19 +18,31 @@ impl Log {
         let file = BufWriter::new(file);
         Ok(Log {
             file: Arc::new(RwLock::new(file)),
+            dirty: Arc::new(AtomicBool::new(false)),
         })
     }
 
     pub async fn write<T: AsRef<[u8]>>(&self, msg: T) -> Result<()> {
         let mut file = self.file.write().await;
+        let message = format!("{:?} :: ", chrono::Local::now());
+        file.write(message.as_bytes()).await?;
         file.write(msg.as_ref()).await?;
         file.write(b"\n").await?;
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
     pub async fn flush(&self) -> Result<()> {
+        if !self.dirty.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        };
         let mut file = self.file.write().await;
-        file.flush().await
+        let out = file.flush().await;
+        if out.is_ok() {
+            self.dirty
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+        out
     }
 }
 

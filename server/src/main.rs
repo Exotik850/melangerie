@@ -2,28 +2,36 @@ mod auth;
 mod chat;
 mod cors;
 mod log;
-mod timing;
-use timing::TimeState;
 #[cfg(test)]
 mod test;
+mod timing;
 mod types;
 #[macro_use]
 extern crate rocket;
 const FILE_PATH: &str = "./public";
-type LockedMap<K, V> = RwLock<HashMap<K, V>>;
 type LockedSet<T> = RwLock<HashSet<T>>;
-use std::collections::{HashMap, HashSet};
-type ChatroomsDB = LockedMap<ChatRoomID, Vec<UserID>>;
+use std::collections::HashSet;
+
 // Map Users to their sender which is sending to their active websocket connection
 // and a Vec of messages that have been sent to them while they were offline
-type UserDB = LockedMap<UserID, User>;
 use log::Log;
-use rocket::{fs::NamedFile, http::Status, serde::json::Json, tokio::sync::RwLock, State};
-use serde::Deserialize;
+use rocket::tokio;
+use rocket::{
+    fs::NamedFile,
+    http::Status,
+    serde::json::Json,
+    tokio::{io::AsyncWriteExt, sync::RwLock},
+    State,
+};
+use rocket_sync_db_pools::{database, rusqlite::Connection as SqliteConnection};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use types::{ChatRoomID, User, UserID};
+use types::{UserDB, UserID};
 
-use rocket::tokio::runtime::{Handle, Runtime};
+#[database("sqlite_db")]
+struct SqliteDB(SqliteConnection);
+
+use tokio::runtime::{Handle, Runtime};
 pub fn get_runtime_handle() -> (Handle, Option<Runtime>) {
     match Handle::try_current() {
         Ok(h) => (h, None),
@@ -33,7 +41,6 @@ pub fn get_runtime_handle() -> (Handle, Option<Runtime>) {
         }
     }
 }
-
 
 use std::future::Future;
 pub fn run_or_block<F, T>(f: F) -> T
@@ -49,15 +56,19 @@ where
 
 #[get("/<file..>")]
 async fn file_server(file: PathBuf) -> std::io::Result<NamedFile> {
-    let path = if file.to_str().map_or(false, str::is_empty) {
+    let file_str = file.to_str();
+    dbg!(&file_str);
+    let path = if file_str.map_or(false, str::is_empty) {
         PathBuf::from("index.html")
+    } else if file.components().count() == 1 {
+        PathBuf::from(format!("{}.html", file_str.unwrap()))
     } else {
         file
     };
     NamedFile::open(PathBuf::from(FILE_PATH).join(path)).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct ReportInfo {
     name: String,
     issue: String,
@@ -76,7 +87,7 @@ async fn report(info: Json<ReportInfo>, log: &State<Log>) -> Status {
 
 async fn periodic_flush(log: Log) {
     loop {
-        rocket::tokio::time::sleep(rocket::tokio::time::Duration::from_secs(5)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         log.flush().await.unwrap();
     }
 }
@@ -85,13 +96,21 @@ async fn periodic_flush(log: Log) {
 async fn rocket() -> _ {
     dotenvy::dotenv().ok();
     let log = Log::new().unwrap();
-    rocket::tokio::spawn(periodic_flush(log.clone()));
+
+    tokio::spawn(periodic_flush(log.clone()));
+    // tokio::spawn(timing_flush(time_db.clone()));
     rocket::build()
-        .manage(UserDB::default())
-        .manage(ChatroomsDB::default())
+        // .manage(server_state)
         .manage(log)
-        .manage(TimeState::new())
+        .manage(UserDB::default())
         .attach(cors::Cors)
+        .attach(SqliteDB::fairing())
+        // .attach(AdHoc::on_shutdown("Save Dbs", |rocket| {
+        //     Box::pin(async {
+        //         let server_state: &ServerState = rocket.state().unwrap();
+        //         server_state.to_file(".server").await.unwrap();
+        //     })
+        // }))
         .mount(
             "/chat",
             routes![

@@ -1,24 +1,17 @@
 use chrono::{DateTime, NaiveDate, Utc};
-use rocket::{
-    data::{Data, FromData, Outcome},
-    form::FromFormField,
-    http::RawStr,
-    serde::json::Json,
-    tokio::{runtime::Handle, sync::RwLock},
-    Request, State,
-};
+use rocket::{form::FromFormField, serde::json::Json, tokio::sync::RwLock, State};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     ops::Deref,
-    sync::{
-        atomic::{AtomicU64, AtomicUsize},
-        Arc,
-    },
+    sync::{atomic::AtomicUsize, Arc},
 };
 
 use chrono::NaiveDateTime;
 use chrono::NaiveTime;
+
+// type AllowedTimeDB = HashMap<UserID, HashSet<UserID>>;
 
 // https://stackoverflow.com/questions/25413201/how-do-i-implement-a-trait-i-dont-own-for-a-type-i-dont-own
 // https://github.com/SergioBenitez/Rocket/issues/602#issuecomment-380497269
@@ -55,21 +48,48 @@ impl<'v> FromFormField<'v> for NaiveDateForm {
     }
 }
 
-use crate::{auth::Jwt, types::UserID};
+use crate::{auth::Jwt, types::UserID, SqliteDB};
 
 #[get("/time?<start>&<end>")]
 pub async fn get_time(
     user: Jwt,
     start: Option<NaiveDateForm>,
     end: Option<NaiveDateForm>,
-    time_state: &State<TimeState>,
+    db: &State<SqliteDB>,
 ) -> Option<Json<Vec<TimeRange>>> {
-    let ts = time_state.data.read().await;
-    let user_timesheet = ts.get(&user.name)?;
+    // let ts = server_state.time.data.read().await;
+    // let user_timesheet = ts.get(&user.name)?;
+    let mut time_range = db
+        .run(move |d| {
+            let mut stmt = d.prepare(
+                "
+          SELECT te.timesheet_id, te.start_time, te.start_note, te.end_time, te.end_note
+          FROM timesheets ts
+          INNER JOIN time_entries te ON ts.id = te.timesheet_id
+          WHERE ts.user_id = ?
+      ",
+            )?;
+
+            let stmt = stmt.query_map(params![user.name.0], |row| {
+                Ok(TimeRange {
+                    id: row.get(0)?,
+                    start: Timestamp {
+                        time: row.get(1)?,
+                        note: row.get(2)?,
+                    },
+                    end: Timestamp {
+                        time: row.get(3)?,
+                        note: row.get(4)?,
+                    },
+                })
+            })?;
+            stmt.collect::<Result<Vec<TimeRange>, _>>()
+        })
+        .await
+        .ok()?;
 
     if start.is_none() && end.is_none() {
-        let times = user_timesheet.completed.clone();
-        return Some(Json(times));
+        return Some(Json(time_range));
     }
 
     let start = start
@@ -79,47 +99,33 @@ pub async fn get_time(
         .map(|date| date.0)
         .unwrap_or_else(|| Utc::now().date_naive());
 
-    let times = user_timesheet.find_in_range(start, end).cloned().collect();
+    time_range.retain(|t| start >= t.start.time.date_naive() && t.end.time.date_naive() <= end);
 
-    Some(Json(times))
+    Some(Json(time_range))
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Clone)]
 pub struct TimeState {
-    #[serde(with = "arc_rw_serde")]
     pub data: Arc<RwLock<HashMap<UserID, TimeSheet>>>,
-    id_counter: AtomicUsize,
-}
-
-mod arc_rw_serde {
-    use crate::run_or_block;
-    use rocket::{
-        serde::{Deserialize, Deserializer, Serialize, Serializer},
-        tokio::sync::RwLock,
-    };
-    use std::sync::Arc;
-
-    pub fn serialize<T, S>(data: &Arc<RwLock<T>>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        T: Serialize,
-        S: Serializer,
-    {
-        let data = run_or_block(data.read());
-        T::serialize(&data, serializer)
-    }
-
-    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<Arc<RwLock<T>>, D::Error>
-    where
-        T: Deserialize<'de>,
-        D: Deserializer<'de>,
-    {
-        Ok(Arc::new(RwLock::new(T::deserialize(deserializer)?)))
-    }
+    id_counter: Arc<AtomicUsize>,
 }
 
 impl TimeState {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn from_data(data: HashMap<UserID, TimeSheet>) -> Self {
+        let max_id = data
+            .values()
+            .flat_map(|sheet| sheet.completed.iter())
+            .map(|range| range.id)
+            .max()
+            .unwrap_or(0);
+        TimeState {
+            data: Arc::new(RwLock::new(data)),
+            id_counter: Arc::new(AtomicUsize::new(max_id)),
+        }
     }
 
     pub async fn start(&self, user: UserID, note: Option<String>) {
@@ -136,9 +142,9 @@ impl TimeState {
         }
     }
 
-    pub async fn stop(&self, user: UserID, note: Option<String>) -> Option<usize> {
+    pub async fn stop(&self, user: &UserID, note: Option<String>) -> Option<usize> {
         let mut data = self.data.write().await;
-        let sheet = data.get_mut(&user)?;
+        let sheet = data.get_mut(user)?;
         let Some(start) = sheet.current.take() else {
             return None;
         };
@@ -154,6 +160,14 @@ impl TimeState {
             id,
         });
         Some(id)
+    }
+
+    pub async fn is_active(&self, user: &UserID) -> Option<bool> {
+        self.data
+            .read()
+            .await
+            .get(user)
+            .map(|sheet| sheet.current.is_some())
     }
 }
 

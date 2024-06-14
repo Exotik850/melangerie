@@ -1,34 +1,63 @@
+use std::{collections::HashMap, sync::Arc};
+
 use rocket::{
     request::{FromParam, FromRequest, Outcome},
-    tokio::sync::broadcast::Sender,
+    tokio::sync::{broadcast::Sender, RwLock},
     Request,
 };
+use rusqlite::types::FromSql;
 use serde::{Deserialize, Serialize};
 
-use crate::UserDB;
+use crate::SqliteDB;
 
+pub type UserDB = Arc<RwLock<HashMap<UserID, User>>>;
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct User {
     pub name: UserID,
     pub status: UserStatus,
-    // Messages to this user, sent on reconnect
-    pub messages: Vec<ServerAction>,
     // Hashed password
     pub password: String,
 }
 
+fn user_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
+    Ok(User {
+        name: row.get(0)?,
+        status: UserStatus::Inactive,
+        password: row.get(1)?,
+    })
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum UserStatus {
+    #[serde(skip)]
     Active(Sender<ServerAction>),
     Inactive,
 }
 
+impl PartialEq for UserStatus {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (UserStatus::Active(a), UserStatus::Active(b)) => a.same_channel(b),
+            (UserStatus::Inactive, UserStatus::Inactive) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone, Ord, PartialOrd)]
 pub struct UserID(pub(crate) String);
+impl FromSql for UserID {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str().map(|s| UserID(s.to_string()))
+    }
+}
 
 impl<T: Into<String>> From<T> for UserID {
     fn from(val: T) -> Self {
         UserID(val.into())
     }
-} 
+}
 
 impl std::fmt::Display for UserID {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -58,20 +87,38 @@ impl<'r> FromRequest<'r> for UserID {
                 ))
             }
         };
-        let user_db: &UserDB = req.rocket().state().unwrap();
-        if user_db.read().await.contains_key(&id) {
-            Outcome::Success(id)
-        } else {
-            Outcome::Error((rocket::http::Status::Unauthorized, "Invalid user_id cookie"))
-        }
+        let user_db: &SqliteDB = req.rocket().state().unwrap();
+        let query_id = id.clone();
+        let Ok(_): Result<UserID, _> = user_db
+            .0
+            .run(|conn| {
+                conn.query_row("select id from Users where id=?", [query_id.0], |row| {
+                    row.get(0)
+                })
+            })
+            .await
+        else {
+            return Outcome::Error((rocket::http::Status::Unauthorized, "Invalid user_id cookie"));
+        };
+        Outcome::Success(id)
     }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone, Copy)]
-pub struct MessageID(pub(crate) usize);
+pub struct MessageID(pub(crate) i64);
+impl FromSql for MessageID {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_i64().map(MessageID)
+    }
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone)]
 pub struct ChatRoomID(pub(crate) String);
+impl FromSql for ChatRoomID {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str().map(|i| ChatRoomID(i.into()))
+    }
+}
 
 impl<'r> FromParam<'r> for ChatRoomID {
     type Error = &'static str;
@@ -82,10 +129,21 @@ impl<'r> FromParam<'r> for ChatRoomID {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct ChatMessage {
+    pub id: MessageID,
     pub sender: UserID,
     pub room: ChatRoomID,
     pub content: String,
     pub timestamp: u64,
+}
+
+pub fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
+    Ok(ChatMessage {
+        id: row.get(0)?,
+        sender: row.get(1)?,
+        room: row.get(2)?,
+        content: row.get(3)?,
+        timestamp: row.get(4)?,
+    })
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -98,6 +156,8 @@ pub enum UserAction {
     ListUsers,
     TimeIn(Option<String>),
     TimeOut(Option<String>),
+    CheckTime,
+    AllowTime(UserID),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -110,6 +170,7 @@ pub enum ServerAction {
         added: UserID,
     },
     List(Vec<UserID>),
+    TimedIn(bool),
     Leave((ChatRoomID, UserID)),
     Error(String),
 }

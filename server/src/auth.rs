@@ -1,6 +1,6 @@
 use crate::{
-    types::{User, UserStatus},
-    UserDB, UserID,
+    types::{User, UserDB, UserStatus},
+    SqliteDB, UserID,
 };
 use jsonwebtoken::Algorithm;
 use rocket::State;
@@ -10,6 +10,7 @@ use rocket::{
     request::{FromRequest, Outcome},
     Request,
 };
+use rusqlite::params;
 
 const HASH_COST: u32 = 12;
 
@@ -72,12 +73,13 @@ pub async fn check_user(name: String, db: &State<UserDB>) -> &'static str {
 #[post("/createuser", data = "<form>")]
 pub async fn create_user(
     form: Form<Credentials<'_>>,
-    db: &State<UserDB>,
+    user_db: &State<UserDB>,
+    db: &State<SqliteDB>,
 ) -> (Status, Option<String>) {
     let Credentials { name, password } = form.into_inner();
-    let mut db = db.write().await;
+    let mut user_db = user_db.write().await;
     let id = UserID(name.into());
-    if db.contains_key(&id) {
+    if user_db.contains_key(&id) {
         return (Status::Conflict, None);
     }
     let (Ok(secret), Ok(hashed)) = (
@@ -87,15 +89,22 @@ pub async fn create_user(
         return (Status::InternalServerError, None);
     };
     // Insert the user into the database
-    db.insert(
+    user_db.insert(
         id.clone(),
         User {
-            name: id,
-            messages: vec![],
-            password: hashed,
+            name: id.clone(),
+            password: hashed.clone(),
             status: UserStatus::Inactive,
         },
     );
+    // Insert the user into the sqlite database
+    db.run(move |d| {
+        d.execute(
+            "INSERT INTO users (id, password) VALUES (?1, ?2)",
+            params![id.0, hashed],
+        );
+    })
+    .await;
     (Status::Ok, Some(encode_jwt(name, secret)))
 }
 pub fn encode_jwt<T: AsRef<[u8]>>(name: &str, secret: T) -> String {
