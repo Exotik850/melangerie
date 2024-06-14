@@ -13,6 +13,7 @@ export const messageStore = writable<Record<string, Message[]>>({});
 export const selectedRoom = writable<string | null>(null);
 export const usersStore = writable<string[]>([]);
 export const tabHidden = writable(false);
+export const timedIn = writable(false);
 // let sound = new Audio("/notification.mp3");
 let sound: HTMLAudioElement | null = null;
 
@@ -40,6 +41,9 @@ type Added = {
   added: string;
   timestamp: number;
 }
+type TimeInOut = {
+  note?: string;
+}
 
 // Create a new store with the given data.
 export const incomingMessages = writable<State>({});
@@ -55,6 +59,7 @@ export const connect = (url: URL) => {
     let token = get(token_store);
     console.log("Sending token", token);
     ws.send(token);
+    ws.send(JSON.stringify({ action: "CheckTime" }));
   };
   ws.onclose = () => {
     console.log("Connection closed");
@@ -74,7 +79,7 @@ export const connect = (url: URL) => {
     const data: Payload = JSON.parse(await message.data.text());
     handlePayload(data);
   });
-  incomingMessages.update((state) => ({
+  incomingMessages.update(() => ({
     socket: ws,
   }));
 };
@@ -107,15 +112,19 @@ function handlePayload(payload: Payload) {
           sender: "Server",
           content: content,
           timestamp: timestamp,
+          room: roomName,
         });
         if (get(selectedRoom) != roomName) {
-          toast.success(`${user} joined ${roomName}`);
+          toast.success(`${added} joined ${roomName}`);
         }
         return state;
       });
     case "List":
       if (!payload.data) return;
       usersStore.set(payload.data);
+      break;
+    case "TimedIn":
+      timedIn.set(payload.data || false);
       break;
     default:
       break;

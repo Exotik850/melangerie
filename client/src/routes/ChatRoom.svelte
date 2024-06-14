@@ -6,6 +6,7 @@
     incomingMessages,
     messageStore,
     selectedRoom,
+    sendMessage,
     token_store,
     uname,
   } from "$lib/stores";
@@ -64,7 +65,7 @@
 <style lang="scss">
   .chat-container {
     display: flex;
-    height: 100vh;
+    height: 90%;
   }
   .sidebar {
     width: 200px;
