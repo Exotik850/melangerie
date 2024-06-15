@@ -1,9 +1,10 @@
-INSERT INTO users (user_id, password) VALUES ('admin', '______________');
 
 CREATE TABLE IF NOT EXISTS users (
   user_id TEXT PRIMARY KEY,
   password VARCHAR(255) NOT NULL
 );
+
+INSERT INTO users (user_id, password) VALUES ('admin', '______________');
 
 CREATE TABLE IF NOT EXISTS chatrooms (
   chatroom_id TEXT PRIMARY KEY
