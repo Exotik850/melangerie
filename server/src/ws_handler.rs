@@ -1,4 +1,7 @@
-use std::{ops::Deref, sync::{Arc, RwLock}};
+use std::{
+    ops::Deref,
+    sync::{Arc, RwLock},
+};
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -69,13 +72,12 @@ struct JoinEvent {
 impl UserEvent for MessageEvent {
     type State = (SqliteDB, UserDB);
     async fn handle(self, (db, user_db): &Self::State) {
-        let params = Arc::new(params![self.room_id,self.content]);
-        let p2 = params.clone();
+        let s2 = (self.room_id.clone(), self.content.clone());
         let added = db
             .run(move |d| {
                 d.execute(
                     "INSERT INTO messages (room_id, content) VALUES (?, ?)",
-                    params.deref(),
+                    params![self.room_id, self.content],
                 )
             })
             .await
@@ -83,12 +85,9 @@ impl UserEvent for MessageEvent {
         if added {
             let users: Vec<String> = db
                 .run(move |d| {
-                    Ok(
                         d.prepare("select user_id from chatrooms_users where chatroom_id=?")?
-                            .query_map(p2.deref(), |r| r.get(0))?
-                            .filter_map(Result::ok)
-                            .collect(),
-                    )
+                            .query_map(params![s2.0, s2.1], |r| r.get(0))?
+                            .collect::<Result<Vec<_>, _>>()
                 })
                 .await
                 .unwrap();
