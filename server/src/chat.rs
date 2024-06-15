@@ -1,5 +1,5 @@
 use crate::log::Log;
-use crate::types::{message_from_row, ChatRoomID, MessageID, ServerAction, UserAction, UserDB};
+use crate::types::{message_from_row, ChatRoomID, ServerAction, UserAction, UserDB};
 use crate::SqliteDB;
 use crate::{
     auth::{decode_jwt, Jwt},
@@ -19,7 +19,7 @@ use ws::Message;
 #[get("/connect")]
 pub async fn connect<'r>(
     ws: ws::WebSocket,
-    db: &'r State<SqliteDB>,
+    db: SqliteDB,
     user_db: &'r State<UserDB>,
     log: &'r State<Log>,
     shutdown: Shutdown,
@@ -30,7 +30,7 @@ pub async fn connect<'r>(
 }
 
 #[get("/list")]
-pub async fn list_rooms(db: &State<SqliteDB>, user: Jwt) -> Json<Vec<String>> {
+pub async fn list_rooms(db: SqliteDB, user: Jwt) -> Json<Vec<String>> {
     let rooms: Vec<_> = db
         .run(move |d| {
             let mut stmt = d.prepare("select chatroom_id from chatrooms where user_id = ?")?;
@@ -66,22 +66,22 @@ async fn add_user(user_id: UserID, room: ChatRoomID, db: &SqliteDB) -> bool {
 pub async fn add_user_to_room(
     room: ChatRoomID,
     user_id: UserID,
-    db: &State<SqliteDB>,
+    db: SqliteDB,
     user_db: &State<UserDB>,
     auth_user: Jwt,
 ) -> Status {
-    if !add_user(user_id.clone(), room.clone(), db).await {
+    if !add_user(user_id.clone(), room.clone(), &db).await {
         return Status::NotFound;
     };
     send_msg(
         ChatMessage {
-            id: MessageID(0),
+            // id: MessageID(0),
             sender: "Server".into(),
             room,
             content: format!("{} added {} to the room", auth_user.name.0, user_id.0),
             timestamp: jsonwebtoken::get_current_timestamp(),
         },
-        db,
+        &db,
         user_db,
     )
     .await;
@@ -90,7 +90,7 @@ pub async fn add_user_to_room(
 }
 
 #[post("/chatroom", data = "<msg>")]
-pub async fn send_message(msg: Json<ChatMessage>, user_db: &State<UserDB>, db: &State<SqliteDB>) {
+pub async fn send_message(msg: Json<ChatMessage>, user_db: &State<UserDB>, db: SqliteDB) {
     let chatroom_id = msg.0.room.clone();
     let users = db
         .run(move |d| {
@@ -120,23 +120,23 @@ pub async fn send_message(msg: Json<ChatMessage>, user_db: &State<UserDB>, db: &
 #[post("/create/<name>/<users..>")]
 pub async fn create_room(
     name: ChatRoomID,
-    db: &State<SqliteDB>,
+    db: SqliteDB,
     user_db: &State<UserDB>,
     users: PathBuf,
     user: Jwt,
 ) -> Status {
     {
         let room = name.clone();
-        if db
+        if let Err(e) = db
             .run(move |d| {
                 d.execute(
-                    "insert into chatrooms chatroom_id values (?)",
+                    "INSERT INTO chatrooms (chatroom_id) values (?)",
                     params![room.0],
                 )
             })
             .await
-            .is_err()
         {
+            println!("Error creating room: {:?}", e);
             return Status::InternalServerError;
         };
 
@@ -158,29 +158,34 @@ pub async fn create_room(
         }
 
         let room = name.clone();
-        db.run(move |d| {
-            let mut batch = String::from("BEGIN\n");
-            for user in users {
-                batch += &format!(
-                    "insert into chatroom_users (chatroom_id, user_id) values ({}, {user})\n",
-                    &room.0
-                );
-            }
-            batch += "COMMIT";
-            d.execute_batch(&batch);
-        })
-        .await;
+        if let Err(e) = db
+            .run(move |d| {
+                let mut batch = String::from("BEGIN\n");
+                for user in users {
+                    batch += &format!(
+                        "insert into chatroom_users values (chatroom_id, user_id) values ({}, {user});\n",
+                        &room.0
+                    );
+                }
+                batch += "COMMIT;";
+                d.execute_batch(&batch)
+            })
+            .await
+        {
+            println!("Error adding users to room: {:?}", e);
+            return Status::InternalServerError;
+        };
     }
 
     send_msg(
         ChatMessage {
-            id: MessageID(0),
+            // id: MessageID(0),
             sender: "admin".into(),
             room: name,
             content: format!("{} created the room", user.name.0),
             timestamp: jsonwebtoken::get_current_timestamp(),
         },
-        db,
+        &db,
         user_db,
     )
     .await;
@@ -226,13 +231,17 @@ async fn send_msg(msg: ChatMessage, db: &SqliteDB, user_db: &UserDB) {
             };
         }
         let msg = msg.clone();
-        db.run(move |d| {
-            d.execute(
-                "insert into messages (sender, room, content, timestamp) values (?, ?, ?, ?)",
-                params![msg.sender.0, msg.room.0, msg.content, msg.timestamp],
-            );
-        })
-        .await;
+        if let Err(e) = db
+            .run(move |d| {
+                d.execute(
+                    "insert into messages (sender, room, content, timestamp) values (?, ?, ?, ?)",
+                    params![msg.sender.0, msg.room.0, msg.content, msg.timestamp],
+                )
+            })
+            .await
+        {
+            log::error!("Failed to insert message into database: {}", e);
+        };
     }
 }
 
@@ -263,7 +272,7 @@ async fn handle_user_close(id: &UserID, user_db: &UserDB) {
 async fn handle_connection(
     mut stream: DuplexStream,
     mut shutdown: Shutdown,
-    db: &SqliteDB,
+    db: SqliteDB,
     user_db: &UserDB,
     log: &Log,
 ) -> ws::result::Result<()> {
@@ -289,10 +298,13 @@ async fn handle_connection(
         let (tx, rx) = rocket::tokio::sync::broadcast::channel(16);
 
         let messages = db.run(move |d| {
-          let mut stmt = d.prepare("select * from messages where room in (select chatroom_id from chatroom_users where user_id = ?)")?;
+          let mut stmt = d.prepare("select * from messages where chatroom_id in (select chatroom_id from chatroom_users where user_id = ?)")?;
           let stmt = stmt.query_map(params![uida.0], message_from_row)?;
           stmt.collect::<Result<Vec<_>, _>>()
-        }).await.map_err(|e| ws::result::Error::Utf8)?; // TODO : Handle error correctly
+        }).await.map_err(|e| {
+          println!("Error: {:?}", e);
+          ws::result::Error::Utf8
+        })?; // TODO : Handle error correctly
 
         user.status = UserStatus::Active(tx);
         (rx, messages)
@@ -305,7 +317,10 @@ async fn handle_connection(
             stmt.collect::<Result<Vec<_>, _>>()
         })
         .await
-        .map_err(|e| ws::result::Error::Utf8)?
+        .map_err(|e| {
+            println!("Error: {:?}", e);
+            ws::result::Error::Utf8
+        })?
     // TODO : Handle error correctly
     {
         let msg = ServerAction::Add {
@@ -339,7 +354,7 @@ async fn handle_connection(
             },
             // A message has been received from the user
             sent_msg = stream.next() => if let Some(Ok(msg)) = sent_msg {
-                if handle_user_message(msg, &id, db, user_db, log).await {
+                if handle_user_message(msg, &id, &db, user_db, log).await {
                     let _ = stream.send(Message::Close(None)).await;
                     handle_user_close(&id, user_db).await;
                     break;
@@ -388,17 +403,22 @@ async fn handle_user_message(
                 // };
                 // users.retain(|user| user != id);
                 let (room, id) = (room.clone(), id.clone());
-                db.run(move |d| {
-                    d.execute(
-                        "delete from chatroom_users where chatroom_id = ? and user_id = ?",
-                        params![room.0, id.0],
-                    );
-                })
-                .await;
+                if let Err(e) = db
+                    .run(move |d| {
+                        d.execute(
+                            "delete from chatroom_users where chatroom_id = ? and user_id = ?",
+                            params![room.0, id.0],
+                        )
+                    })
+                    .await
+                {
+                    log::error!("Failed to remove user from room: {}", e);
+                    return false;
+                };
             }
             send_msg(
                 ChatMessage {
-                    id: MessageID(0),
+                    // id: MessageID(0),
                     sender: "admin".into(),
                     room,
                     content: format!("{} left the room", id.0),
@@ -415,7 +435,7 @@ async fn handle_user_message(
             }
             send_msg(
                 ChatMessage {
-                    id: MessageID(0),
+                    // id: MessageID(0),
                     sender: "admin".into(),
                     room,
                     content: format!("{} added {} to the room", id.0, user.0),
@@ -433,26 +453,31 @@ async fn handle_user_message(
         UserAction::TimeIn(note) => {
             log::info!("{} Timed in: {:?}", id, note);
             let id = id.clone();
-            db.run(move |d| {
-                let statement = format!(
-                    "BEGIN TRANSACTION \
+            if let Err(e) = db
+                .run(move |d| {
+                    let statement = format!(
+                        "BEGIN TRANSACTION \
                 INSERT INTO time_entries (timesheet_id, start_time, start_note) \
                 SELECT timesheet_id, CURRENT_TIMESTAMP, {} \
                 FROM timesheets WHERE user_id = {id} AND clocked_in = 0;
                 UPDATE timesheets SET clocked_in = 1 WHERE user_id = {id} AND clocked_in = 0;
                 COMMIT;",
-                    note.as_deref().unwrap_or("NULL")
-                );
-                d.execute_batch(&statement);
-            })
-            .await;
+                        note.as_deref().unwrap_or("NULL")
+                    );
+                    d.execute_batch(&statement)
+                })
+                .await
+            {
+                log::error!("Failed to insert time entry: {}", e);
+            };
         }
         UserAction::TimeOut(note) => {
             log::info!("{} Timed out: {:?}", id, note);
             let id = id.clone();
-            db.run(move |d| {
-                let statement = format!(
-                    "BEGIN TRANSACTION \
+            if let Err(e) = db
+                .run(move |d| {
+                    let statement = format!(
+                        "BEGIN TRANSACTION \
                 UPDATE time_entries \
                 SET end_time = CURRENT_TIMESTAMP, end_note = {}
                 WHERE time_entry_id = (
@@ -464,11 +489,14 @@ async fn handle_user_message(
                 SET clocked_in = 0, current_id = NULL
                 WHERE user_id = {id} AND clocked_in = 1;
                 COMMIT;",
-                    note.as_deref().unwrap_or("NULL")
-                );
-                d.execute_batch(&statement);
-            })
-            .await;
+                        note.as_deref().unwrap_or("NULL")
+                    );
+                    d.execute_batch(&statement)
+                })
+                .await
+            {
+                log::error!("Failed to insert time entry: {}", e);
+            };
         }
         UserAction::CheckTime => {
             // let timed_in = server_state.time.is_active(id).await.unwrap_or(false);

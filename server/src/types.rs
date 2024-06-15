@@ -129,7 +129,7 @@ impl<'r> FromParam<'r> for ChatRoomID {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct ChatMessage {
-    pub id: MessageID,
+    // pub id: MessageID,
     pub sender: UserID,
     pub room: ChatRoomID,
     pub content: String,
@@ -138,11 +138,11 @@ pub struct ChatMessage {
 
 pub fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
     Ok(ChatMessage {
-        id: row.get(0)?,
-        sender: row.get(1)?,
-        room: row.get(2)?,
-        content: row.get(3)?,
-        timestamp: row.get(4)?,
+        // id: row.get(0)?,
+        sender: row.get(0)?,
+        room: row.get(1)?,
+        content: row.get(2)?,
+        timestamp: row.get(3)?,
     })
 }
 

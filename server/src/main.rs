@@ -15,6 +15,7 @@ use std::collections::HashSet;
 // Map Users to their sender which is sending to their active websocket connection
 // and a Vec of messages that have been sent to them while they were offline
 use log::Log;
+use rocket::fairing::AdHoc;
 use rocket::tokio;
 use rocket::{
     fs::NamedFile,
@@ -26,7 +27,7 @@ use rocket::{
 use rocket_sync_db_pools::{database, rusqlite::Connection as SqliteConnection};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use types::{UserDB, UserID};
+use types::{User, UserDB, UserID, UserStatus};
 
 #[database("sqlite_db")]
 struct SqliteDB(SqliteConnection);
@@ -57,7 +58,6 @@ where
 #[get("/<file..>")]
 async fn file_server(file: PathBuf) -> std::io::Result<NamedFile> {
     let file_str = file.to_str();
-    dbg!(&file_str);
     let path = if file_str.map_or(false, str::is_empty) {
         PathBuf::from("index.html")
     } else if file.components().count() == 1 {
@@ -99,12 +99,51 @@ async fn rocket() -> _ {
 
     tokio::spawn(periodic_flush(log.clone()));
     // tokio::spawn(timing_flush(time_db.clone()));
+    let udb = UserDB::default();
     rocket::build()
         // .manage(server_state)
         .manage(log)
-        .manage(UserDB::default())
+        .manage(udb.clone())
         .attach(cors::Cors)
         .attach(SqliteDB::fairing())
+        .attach(AdHoc::on_liftoff("Load DB", move |rocket| {
+            Box::pin(async move {
+                let Some(db) = SqliteDB::get_one(rocket).await else {
+                    panic!("Failed to get database");
+                };
+                db.run(move |d| {
+                    d.execute(
+                        include_str!("../migrations/2024-05-17-172244_create_users/up.sql"),
+                        [],
+                    )
+                })
+                .await
+                .unwrap();
+                let users: Vec<(UserID, User)> = db
+                    .run(move |d| {
+                        d.prepare("SELECT user_id, password FROM users")
+                            .unwrap()
+                            .query_map([], |row| {
+                                let id: UserID = row.get::<_, String>(0).unwrap().into();
+                                let pass: String = row.get(1).unwrap();
+                                Ok((
+                                    id.clone(),
+                                    User {
+                                        name: id,
+                                        password: pass,
+                                        status: UserStatus::Inactive,
+                                    },
+                                ))
+                            })
+                            .unwrap()
+                            .map(Result::unwrap)
+                            .collect::<Vec<_>>()
+                    })
+                    .await;
+                let mut udb = udb.write().await;
+                udb.extend(users.into_iter());
+            })
+        }))
         // .attach(AdHoc::on_shutdown("Save Dbs", |rocket| {
         //     Box::pin(async {
         //         let server_state: &ServerState = rocket.state().unwrap();

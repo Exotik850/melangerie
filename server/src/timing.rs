@@ -55,7 +55,7 @@ pub async fn get_time(
     user: Jwt,
     start: Option<NaiveDateForm>,
     end: Option<NaiveDateForm>,
-    db: &State<SqliteDB>,
+    db: SqliteDB,
 ) -> Option<Json<Vec<TimeRange>>> {
     // let ts = server_state.time.data.read().await;
     // let user_timesheet = ts.get(&user.name)?;
