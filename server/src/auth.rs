@@ -56,9 +56,11 @@ pub async fn login_user(login: Form<Credentials<'_>>, db: SqliteDB) -> Option<St
     };
     let db_pass: String = match db
         .run(move |d| {
-            d.query_row("SELECT password FROM users WHERE user_id=?", params![n], |row| {
-                row.get(0)
-            })
+            d.query_row(
+                "SELECT password FROM users WHERE user_id=?",
+                params![n],
+                |row| row.get(0),
+            )
         })
         .await
     {
@@ -97,7 +99,7 @@ pub async fn create_user(
     let res = db
         .run(move |d| {
             d.query_row(
-                "SELECT user_id FROM users WHERE id=?",
+                "SELECT user_id FROM users WHERE user_id=?",
                 params![uid.0],
                 |_| Ok(()),
             )
@@ -126,10 +128,15 @@ pub async fn create_user(
     // Insert the user into the sqlite database
     if let Err(e) = db
         .run(move |d| {
+            let params = params![id.0, hashed];
             d.execute(
                 "INSERT INTO users (user_id, password) VALUES (?1, ?2)",
-                params![id.0, hashed],
+                params,
             )
+            .or(d.execute(
+                "INSERT INTO timesheets (user_id, clocked_in, current_id) VALUES (?1, 0, NULL)",
+                params,
+            ))
         })
         .await
     {

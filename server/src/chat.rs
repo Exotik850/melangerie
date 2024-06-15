@@ -456,11 +456,11 @@ async fn handle_user_message(
             if let Err(e) = db
                 .run(move |d| {
                     let statement = format!(
-                        "BEGIN TRANSACTION \
+                        "BEGIN TRANSACTION; \
                 INSERT INTO time_entries (timesheet_id, start_time, start_note) \
-                SELECT timesheet_id, CURRENT_TIMESTAMP, {} \
-                FROM timesheets WHERE user_id = {id} AND clocked_in = 0;
-                UPDATE timesheets SET clocked_in = 1 WHERE user_id = {id} AND clocked_in = 0;
+                SELECT timesheet_id, CURRENT_TIMESTAMP, '{}' \
+                FROM timesheets WHERE user_id = '{id}' AND clocked_in = 0;
+                UPDATE timesheets SET clocked_in = 1 WHERE user_id = '{id}' AND clocked_in = 0;
                 COMMIT;",
                         note.as_deref().unwrap_or("NULL")
                     );
@@ -477,17 +477,17 @@ async fn handle_user_message(
             if let Err(e) = db
                 .run(move |d| {
                     let statement = format!(
-                        "BEGIN TRANSACTION \
+                        "BEGIN TRANSACTION; \
                 UPDATE time_entries \
-                SET end_time = CURRENT_TIMESTAMP, end_note = {}
+                SET end_time = CURRENT_TIMESTAMP, end_note = '{}' \
                 WHERE time_entry_id = (
                   SELECT current_id
                   FROM timesheets
-                  WHERE user_id = {id} AND clocked_in = 1
+                  WHERE user_id = '{id}' AND clocked_in = 1
                 );
                 UPDATE timesheets
                 SET clocked_in = 0, current_id = NULL
-                WHERE user_id = {id} AND clocked_in = 1;
+                WHERE user_id = '{id}' AND clocked_in = 1;
                 COMMIT;",
                         note.as_deref().unwrap_or("NULL")
                     );
@@ -508,6 +508,7 @@ async fn handle_user_message(
                         params![aid.0],
                         |r| r.get(0),
                     )
+                    .inspect_err(|e| log::error!("Failed to check time: {}", e))
                     .unwrap_or(false)
                 })
                 .await;

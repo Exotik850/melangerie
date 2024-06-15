@@ -111,14 +111,9 @@ async fn rocket() -> _ {
                 let Some(db) = SqliteDB::get_one(rocket).await else {
                     panic!("Failed to get database");
                 };
-                db.run(move |d| {
-                    d.execute(
-                        include_str!("../migrations/2024-05-17-172244_create_users/up.sql"),
-                        [],
-                    )
-                })
-                .await
-                .unwrap();
+                db.run(move |d| d.execute_batch(include_str!("../migrations/up.sql")))
+                    .await
+                    .unwrap();
                 let users: Vec<(UserID, User)> = db
                     .run(move |d| {
                         d.prepare("SELECT user_id, password FROM users")

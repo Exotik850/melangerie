@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   password VARCHAR(255) NOT NULL
 );
 
-INSERT INTO users (user_id, password) VALUES ('admin', '______________');
+REPLACE INTO users (user_id, password) VALUES ('admin', '______________');
 
 CREATE TABLE IF NOT EXISTS chatrooms (
   chatroom_id TEXT PRIMARY KEY
