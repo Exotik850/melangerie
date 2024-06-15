@@ -2,6 +2,7 @@ mod auth;
 mod chat;
 mod cors;
 mod log;
+mod ws_handler;
 #[cfg(test)]
 mod test;
 mod timing;
