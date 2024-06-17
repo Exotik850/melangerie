@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS chatroom_users (
 );
 
 CREATE TABLE IF NOT EXISTS messages (
-  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- message_id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT NOT NULL,
   chatroom_id TEXT NOT NULL,
   message TEXT NOT NULL,

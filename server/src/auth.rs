@@ -133,9 +133,9 @@ pub async fn create_user(
                 "INSERT INTO users (user_id, password) VALUES (?1, ?2)",
                 params,
             )
-            .or(d.execute(
+            .and(d.execute(
                 "INSERT INTO timesheets (user_id, clocked_in, current_id) VALUES (?1, 0, NULL)",
-                params,
+                &params[..1],
             ))
         })
         .await

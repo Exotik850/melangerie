@@ -157,14 +157,15 @@ pub async fn create_room(
             return Status::NotFound;
         }
 
-        let room = name.clone();
+        let  room = name.0.replace("'", "\'");
+        
         if let Err(e) = db
             .run(move |d| {
-                let mut batch = String::from("BEGIN\n");
+                let mut batch = String::from("BEGIN TRANSACTION;\n");
                 for user in users {
                     batch += &format!(
-                        "insert into chatroom_users values (chatroom_id, user_id) values ({}, {user});\n",
-                        &room.0
+                        "INSERT INTO chatroom_users (chatroom_id, user_id) VALUES ('{}', {user});\n",
+                        &room
                     );
                 }
                 batch += "COMMIT;";
@@ -234,7 +235,7 @@ async fn send_msg(msg: ChatMessage, db: &SqliteDB, user_db: &UserDB) {
         if let Err(e) = db
             .run(move |d| {
                 d.execute(
-                    "insert into messages (sender, room, content, timestamp) values (?, ?, ?, ?)",
+                    "INSERT INTO messages (user_id, chatroom_id, message, created_at) VALUES (?, ?, ?, ?)",
                     params![msg.sender.0, msg.room.0, msg.content, msg.timestamp],
                 )
             })
@@ -298,13 +299,13 @@ async fn handle_connection(
         let (tx, rx) = rocket::tokio::sync::broadcast::channel(16);
 
         let messages = db.run(move |d| {
-          let mut stmt = d.prepare("select * from messages where chatroom_id in (select chatroom_id from chatroom_users where user_id = ?)")?;
+          let mut stmt = d.prepare("SELECT m.* FROM messages m INNER JOIN chatroom_users cu ON m.chatroom_id = cu.chatroom_id WHERE cu.user_id = ?")?;
           let stmt = stmt.query_map(params![uida.0], message_from_row)?;
           stmt.collect::<Result<Vec<_>, _>>()
         }).await.map_err(|e| {
-          println!("Error: {:?}", e);
+          println!("Error gathering messages: {:?}", e);
           ws::result::Error::Utf8
-        })?; // TODO : Handle error correctly
+        })?;
 
         user.status = UserStatus::Active(tx);
         (rx, messages)
@@ -318,7 +319,7 @@ async fn handle_connection(
         })
         .await
         .map_err(|e| {
-            println!("Error: {:?}", e);
+            println!("Error getting chatroom ids: {:?}", e);
             ws::result::Error::Utf8
         })?
     // TODO : Handle error correctly
