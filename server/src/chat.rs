@@ -1,5 +1,6 @@
 use crate::log::Log;
 use crate::types::{message_from_row, ChatRoomID, ServerAction, UserAction, UserDB};
+use crate::ws_handler::WebSocketHandler;
 use crate::SqliteDB;
 use crate::{
     auth::{decode_jwt, Jwt},
@@ -73,18 +74,18 @@ pub async fn add_user_to_room(
     if !add_user(user_id.clone(), room.clone(), &db).await {
         return Status::NotFound;
     };
-    send_msg(
-        ChatMessage {
-            // id: MessageID(0),
-            sender: "Server".into(),
-            room,
-            content: format!("{} added {} to the room", auth_user.name.0, user_id.0),
-            timestamp: jsonwebtoken::get_current_timestamp(),
-        },
-        &db,
-        user_db,
-    )
-    .await;
+    // send_msg(
+    //     ChatMessage {
+    //         // id: MessageID(0),
+    //         sender: "Server".into(),
+    //         room,
+    //         content: format!("{} added {} to the room", auth_user.name.0, user_id.0),
+    //         timestamp: jsonwebtoken::get_current_timestamp(),
+    //     },
+    //     &db,
+    //     user_db,
+    // )
+    // .await;
 
     Status::Ok
 }
@@ -125,72 +126,70 @@ pub async fn create_room(
     users: PathBuf,
     user: Jwt,
 ) -> Status {
+    let room = name.0.replace('\'', "\'");
+    let r2 = room.clone();
+    if let Err(e) = db
+        .run(move |d| {
+            d.execute(
+                "INSERT INTO chatrooms (chatroom_id) values (?)",
+                params![room],
+            )
+        })
+        .await
     {
-        let room = name.clone();
-        if let Err(e) = db
-            .run(move |d| {
-                d.execute(
-                    "INSERT INTO chatrooms (chatroom_id) values (?)",
-                    params![room.0],
-                )
-            })
-            .await
-        {
-            println!("Error creating room: {:?}", e);
-            return Status::InternalServerError;
-        };
+        println!("Error creating room: {:?}", e);
+        return Status::InternalServerError;
+    };
 
-        let udb = user_db.read().await;
+    let udb = user_db.read().await;
 
-        // Make sure all the users are valid
-        let mut users: Vec<_> = users
-            .iter()
-            .map(|user| UserID(user.to_string_lossy().to_string()))
-            .filter(|user| udb.contains_key(user))
-            .collect();
+    // Make sure all the users are valid
+    let mut users: Vec<_> = users
+        .iter()
+        .map(|user| UserID(user.to_string_lossy().to_string()))
+        .filter(|user| udb.contains_key(user))
+        .collect();
 
-        if !users.contains(&user.name) {
-            users.push(user.name.clone());
-        }
-
-        if users.is_empty() {
-            return Status::NotFound;
-        }
-
-        let  room = name.0.replace("'", "\'");
-        
-        if let Err(e) = db
-            .run(move |d| {
-                let mut batch = String::from("BEGIN TRANSACTION;\n");
-                for user in users {
-                    batch += &format!(
-                        "INSERT INTO chatroom_users (chatroom_id, user_id) VALUES ('{}', {user});\n",
-                        &room
-                    );
-                }
-                batch += "COMMIT;";
-                d.execute_batch(&batch)
-            })
-            .await
-        {
-            println!("Error adding users to room: {:?}", e);
-            return Status::InternalServerError;
-        };
+    if !users.contains(&user.name) {
+        users.push(user.name.clone());
     }
 
-    send_msg(
-        ChatMessage {
-            // id: MessageID(0),
-            sender: "admin".into(),
-            room: name,
-            content: format!("{} created the room", user.name.0),
-            timestamp: jsonwebtoken::get_current_timestamp(),
-        },
-        &db,
-        user_db,
-    )
-    .await;
+    if users.is_empty() {
+        return Status::NotFound;
+    }
 
+    let uclone = users.clone();
+
+    if let Err(e) = db
+        .run(move |d| {
+            let mut batch = String::from("BEGIN TRANSACTION;\n");
+            for user in users {
+                batch += &format!(
+                    "INSERT INTO chatroom_users (chatroom_id, user_id) VALUES ('{}', '{user}');\n",
+                    &r2
+                );
+            }
+            batch += "COMMIT;";
+            d.execute_batch(&batch)
+        })
+        .await
+    {
+        println!("Error adding users to room: {:?}", e);
+        return Status::InternalServerError;
+    };
+
+    user_db
+        .write_to(
+            ChatMessage {
+                // id: MessageID(0),
+                sender: "admin".into(),
+                room: name,
+                content: format!("{} created the room", user.name.0),
+                timestamp: jsonwebtoken::get_current_timestamp(),
+            },
+            &uclone,
+        )
+        .await;
     Status::Ok
 }
 
@@ -208,44 +207,6 @@ async fn get_auth(stream: &mut DuplexStream) -> Option<UserID> {
     Some(token.name)
 }
 
-async fn send_msg(msg: ChatMessage, db: &SqliteDB, user_db: &UserDB) {
-    let chatroom_id = msg.room.clone();
-    let users: Vec<_> = db
-        .run(move |d| {
-            let mut stmt = d.prepare("select user_id from chatroom_users where chatroom_id = ?")?;
-            let stmt = stmt.query_map(params![chatroom_id.0], |r| r.get(0).map(UserID))?;
-            stmt.collect::<Result<Vec<_>, _>>()
-        })
-        .await
-        .unwrap_or_default();
-    let action = ServerAction::Message(msg.clone());
-    let mut user_db = user_db.write().await;
-    for user in &users {
-        let Some(user) = user_db.get_mut(user) else {
-            log::error!("User not found: {:?}", user);
-            continue;
-        };
-        if let UserStatus::Active(sender) = &user.status {
-            let Ok(_) = sender.send(action.clone()) else {
-                log::error!("Failed to send message to user: {:?}", user.name);
-                continue;
-            };
-        }
-        let msg = msg.clone();
-        if let Err(e) = db
-            .run(move |d| {
-                d.execute(
-                    "INSERT INTO messages (user_id, chatroom_id, message, created_at) VALUES (?, ?, ?, ?)",
-                    params![msg.sender.0, msg.room.0, msg.content, msg.timestamp],
-                )
-            })
-            .await
-        {
-            log::error!("Failed to insert message into database: {}", e);
-        };
-    }
-}
-
 async fn send_action(action: ServerAction, user_db: &UserDB, id: &UserID) {
     let mut user_db = user_db.write().await;
     let Some(user) = user_db.get_mut(id) else {
@@ -261,13 +222,6 @@ async fn send_action(action: ServerAction, user_db: &UserDB, id: &UserID) {
     }
 
     // user.messages.push(action);
-}
-
-async fn handle_user_close(id: &UserID, user_db: &UserDB) {
-    if let Some(user) = user_db.write().await.get_mut(id) {
-        user.status = UserStatus::Inactive;
-        log::info!("User disconnected: {:?}", id);
-    }
 }
 
 async fn handle_connection(
@@ -299,13 +253,19 @@ async fn handle_connection(
         let (tx, rx) = rocket::tokio::sync::broadcast::channel(16);
 
         let messages = db.run(move |d| {
-          let mut stmt = d.prepare("SELECT m.* FROM messages m INNER JOIN chatroom_users cu ON m.chatroom_id = cu.chatroom_id WHERE cu.user_id = ?")?;
-          let stmt = stmt.query_map(params![uida.0], message_from_row)?;
-          stmt.collect::<Result<Vec<_>, _>>()
+          d.prepare("SELECT m.* FROM messages m INNER JOIN chatroom_users cu ON m.chatroom_id = cu.chatroom_id WHERE cu.user_id = ?")?
+            .query_map(params![uida.0], message_from_row)?
+            .collect::<Result<Vec<_>, _>>()
         }).await.map_err(|e| {
           println!("Error gathering messages: {:?}", e);
           ws::result::Error::Utf8
         })?;
+
+        if messages.is_empty() {
+            log::error!("No messages found for user: {:?}", id);
+        } else {
+            log::info!("Found {} messages for {:?}", messages.len(), id);
+        }
 
         user.status = UserStatus::Active(tx);
         (rx, messages)
@@ -313,9 +273,9 @@ async fn handle_connection(
 
     for room in db
         .run(move |d| {
-            let mut stmt = d.prepare("select chatroom_id from chatroom_users where user_id = ?")?;
-            let stmt = stmt.query_map(params![uidb.0], |r| r.get(0).map(ChatRoomID))?;
-            stmt.collect::<Result<Vec<_>, _>>()
+            d.prepare("select chatroom_id from chatroom_users where user_id = ?")?
+                .query_map(params![uidb.0], |r| r.get(0).map(ChatRoomID))?
+                .collect::<Result<Vec<_>, _>>()
         })
         .await
         .map_err(|e| {
@@ -335,18 +295,20 @@ async fn handle_connection(
     }
 
     for msg in chat {
+        let action = ServerAction::Message(msg);
         let _ = stream
-            .send(Message::binary(serde_json::to_vec(&msg).unwrap()))
+            .send(Message::binary(serde_json::to_vec(&action).unwrap()))
             .await;
     }
 
+    let state = (db, user_db.clone());
     loop {
         select! {
             // Shutdown the connection if the server is shutting down
             _ = &mut shutdown => {
                 let _ = stream.send(Message::Close(None)).await;
                 log::info!("Shutting down connection: {:?}", id);
-                handle_user_close(&id, user_db).await;
+                user_db.close_user(&id).await;
                 break;
             },
             // A message has been sent to this user
@@ -355,11 +317,12 @@ async fn handle_connection(
             },
             // A message has been received from the user
             sent_msg = stream.next() => if let Some(Ok(msg)) = sent_msg {
-                if handle_user_message(msg, &id, &db, user_db, log).await {
-                    let _ = stream.send(Message::Close(None)).await;
-                    handle_user_close(&id, user_db).await;
-                    break;
-                }
+                // if handle_user_message(msg, &id, &db, user_db, log).await {
+                //     let _ = stream.send(Message::Close(None)).await;
+                //     user_db.close_user(&id).await;
+                //     break;
+                // }
+                state.handle_message(&id, msg).await;
             }
         }
         stream.flush().await?;
@@ -378,75 +341,54 @@ async fn handle_user_message(
     if let Message::Close(_) = msg {
         return true;
     }
-    if !msg.is_binary() && !msg.is_text() {
-        return false;
-    }
-    let data = msg.into_data();
-    let Ok(msg) = serde_json::from_slice::<UserAction>(&data) else {
-        log::error!(
-            "Failed to parse message: {:?}",
-            String::from_utf8_lossy(&data)
-        );
-        return false;
-    };
     log::info!("Received message: {:?}", msg);
+    let msg: UserAction = serde_json::from_slice(&msg.into_data()).unwrap();
     match msg {
-        UserAction::Message(msg) => send_msg(msg, db, user_db).await,
+        // UserAction::Message(msg) => send_msg(msg, db, user_db).await,
         UserAction::Report(msg) => {
             let _ = log.write(format!("Report: {}", msg)).await;
         }
-        UserAction::Leave(room) => {
-            {
-                // let mut cdb = chatrooms.write().await;
-                // let Some(users) = cdb.get_mut(&room) else {
-                //     log::error!("Room not found: {:?}", room);
-                //     return false;
-                // };
-                // users.retain(|user| user != id);
-                let (room, id) = (room.clone(), id.clone());
-                if let Err(e) = db
-                    .run(move |d| {
-                        d.execute(
-                            "delete from chatroom_users where chatroom_id = ? and user_id = ?",
-                            params![room.0, id.0],
-                        )
-                    })
-                    .await
-                {
-                    log::error!("Failed to remove user from room: {}", e);
-                    return false;
-                };
-            }
-            send_msg(
-                ChatMessage {
-                    // id: MessageID(0),
-                    sender: "admin".into(),
-                    room,
-                    content: format!("{} left the room", id.0),
-                    timestamp: jsonwebtoken::get_current_timestamp(),
-                },
-                db,
-                user_db,
-            )
-            .await;
-        }
-        UserAction::Add((room, user)) => {
-            if !add_user(user.clone(), room.clone(), db).await {
-                return false;
-            }
-            send_msg(
-                ChatMessage {
-                    // id: MessageID(0),
-                    sender: "admin".into(),
-                    room,
-                    content: format!("{} added {} to the room", id.0, user.0),
-                    timestamp: jsonwebtoken::get_current_timestamp(),
-                },
-                db,
-                user_db,
-            )
-            .await;
-        }
+        // UserAction::Leave(room) => {
+        //     {
+        //         // let mut cdb = chatrooms.write().await;
+        //         // let Some(users) = cdb.get_mut(&room) else {
+        //         //     log::error!("Room not found: {:?}", room);
+        //         //     return false;
+        //         // };
+        //         // users.retain(|user| user != id);
+        //         let (room, id) = (room.clone(), id.clone());
+
+        //     }
+        //     send_msg(
+        //         ChatMessage {
+        //             // id: MessageID(0),
+        //             sender: "admin".into(),
+        //             room,
+        //             content: format!("{} left the room", id.0),
+        //             timestamp: jsonwebtoken::get_current_timestamp(),
+        //         },
+        //         db,
+        //         user_db,
+        //     )
+        //     .await;
+        // }
+        // UserAction::Add((room, user)) => {
+        //     if !add_user(user.clone(), room.clone(), db).await {
+        //         return false;
+        //     }
+        //     send_msg(
+        //         ChatMessage {
+        //             // id: MessageID(0),
+        //             sender: "admin".into(),
+        //             room,
+        //             content: format!("{} added {} to the room", id.0, user.0),
+        //             timestamp: jsonwebtoken::get_current_timestamp(),
+        //         },
+        //         db,
+        //         user_db,
+        //     )
+        //     .await;
+        // }
         UserAction::ListUsers => {
             let user: Vec<_> = user_db.read().await.keys().cloned().collect();
             send_action(ServerAction::List(user), user_db, id).await;

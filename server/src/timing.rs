@@ -1,11 +1,11 @@
 use chrono::{DateTime, NaiveDate, Utc};
-use rocket::{form::FromFormField, serde::json::Json, tokio::sync::RwLock, State};
+use rocket::{form::FromFormField, serde::json::Json, tokio::sync::RwLock};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     ops::Deref,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{atomic::AtomicI64, Arc},
 };
 
 use chrono::NaiveDateTime;
@@ -61,16 +61,15 @@ pub async fn get_time(
     // let user_timesheet = ts.get(&user.name)?;
     let mut time_range = db
         .run(move |d| {
-            let mut stmt = d.prepare(
+            d.prepare(
                 "
           SELECT te.timesheet_id, te.start_time, te.start_note, te.end_time, te.end_note
           FROM timesheets ts
-          INNER JOIN time_entries te ON ts.id = te.timesheet_id
+          INNER JOIN time_entries te ON ts.timesheet_id = te.timesheet_id
           WHERE ts.user_id = ?
       ",
-            )?;
-
-            let stmt = stmt.query_map(params![user.name.0], |row| {
+            )?
+            .query_map(params![user.name.0], |row| {
                 Ok(TimeRange {
                     id: row.get(0)?,
                     start: Timestamp {
@@ -82,10 +81,11 @@ pub async fn get_time(
                         note: row.get(4)?,
                     },
                 })
-            })?;
-            stmt.collect::<Result<Vec<TimeRange>, _>>()
+            })?
+            .collect::<Result<Vec<TimeRange>, _>>()
         })
         .await
+        .inspect_err(|e| log::error!("Error getting times: {e}"))
         .ok()?;
 
     if start.is_none() && end.is_none() {
@@ -107,7 +107,7 @@ pub async fn get_time(
 #[derive(Default, Clone)]
 pub struct TimeState {
     pub data: Arc<RwLock<HashMap<UserID, TimeSheet>>>,
-    id_counter: Arc<AtomicUsize>,
+    id_counter: Arc<AtomicI64>,
 }
 
 impl TimeState {
@@ -124,7 +124,7 @@ impl TimeState {
             .unwrap_or(0);
         TimeState {
             data: Arc::new(RwLock::new(data)),
-            id_counter: Arc::new(AtomicUsize::new(max_id)),
+            id_counter: Arc::new(AtomicI64::new(max_id)),
         }
     }
 
@@ -142,7 +142,7 @@ impl TimeState {
         }
     }
 
-    pub async fn stop(&self, user: &UserID, note: Option<String>) -> Option<usize> {
+    pub async fn stop(&self, user: &UserID, note: Option<String>) -> Option<i64> {
         let mut data = self.data.write().await;
         let sheet = data.get_mut(user)?;
         let Some(start) = sheet.current.take() else {
@@ -178,7 +178,7 @@ pub struct TimeSheet {
 }
 
 impl TimeSheet {
-    fn get(&self, id: usize) -> Option<&TimeRange> {
+    fn get(&self, id: i64) -> Option<&TimeRange> {
         self.completed.iter().find(|range| range.id == id)
     }
 
@@ -212,7 +212,7 @@ impl TimeSheet {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TimeRange {
-    id: usize,
+    id: i64,
     start: Timestamp,
     end: Timestamp,
 }

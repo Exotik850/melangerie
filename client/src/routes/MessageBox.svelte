@@ -209,7 +209,7 @@
         sender: $uname,
         room: $selectedRoom,
         content: message,
-        timestamp: Date.now(),
+        timestamp: Date.now() / 1000,
       },
     });
     message = "";
@@ -226,8 +226,8 @@
       return;
     }
     sendMessage({
-      action: "Leave",
-      data: $selectedRoom,
+      action: "Egress",
+      data: {room_id: $selectedRoom, user_id: $uname, action: "Leave"},
     });
     messageStore.update((store) => {
       delete store[$selectedRoom];
@@ -243,8 +243,12 @@
     if (user && $selectedRoom && $incomingMessages.socket) {
       $incomingMessages.socket.send(
         JSON.stringify({
-          action: "Add",
-          data: [$selectedRoom, user],
+          action: "Egress",
+          data: {
+            room_id: $selectedRoom,
+            user_id: user,
+            action: "Join",
+          },
         })
       );
     }

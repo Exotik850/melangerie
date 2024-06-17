@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use rocket::{
     request::{FromParam, FromRequest, Outcome},
@@ -10,7 +10,41 @@ use serde::{Deserialize, Serialize};
 
 use crate::SqliteDB;
 
-pub type UserDB = Arc<RwLock<HashMap<UserID, User>>>;
+#[derive(Default, Clone)]
+pub struct UserDB(Arc<RwLock<HashMap<UserID, User>>>);
+impl Deref for UserDB {
+    type Target = Arc<RwLock<HashMap<UserID, User>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl UserDB {
+    pub async fn get_user(&self, id: &UserID) -> Option<User> {
+        self.read().await.get(id).cloned()
+    }
+    pub async fn add_user(&self, user: User) {
+        self.write().await.insert(user.name.clone(), user);
+    }
+    pub async fn write_to(&self, message: ChatMessage, users: &[UserID]) {
+        let udb = self.read().await;
+        for user in users {
+            if let Some(UserStatus::Active(sender)) = udb.get(user).map(|u| &u.status) {
+                if let Err(e) = sender.send(ServerAction::Message(message.clone())) {
+                    log::error!("Failed to send message to user: {e:?}");
+                };
+            } else {
+                log::warn!("User not found: {:?}", user);
+            }
+        }
+    }
+    pub async fn close_user(&self, id: &UserID) {
+        if let Some(user) = self.write().await.get_mut(id) {
+            user.status = UserStatus::Inactive;
+            log::info!("User disconnected: {:?}", id);
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct User {

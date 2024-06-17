@@ -67,7 +67,8 @@ export const connect = (url: URL) => {
   };
   // ws.send(token);
   ws.addEventListener("message", async (message: any) => {
-    console.log("Received:", message.data);
+    let msg = await message.data.text();
+    console.log("Received:", msg);
     if (get(tabHidden)) {
       // play sound
       console.log("Playing sound")
@@ -76,7 +77,7 @@ export const connect = (url: URL) => {
       }
       sound.play();
     }
-    const data: Payload = JSON.parse(await message.data.text());
+    const data: Payload = JSON.parse(msg);
     handlePayload(data);
   });
   incomingMessages.update(() => ({

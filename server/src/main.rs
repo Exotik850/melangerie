@@ -1,12 +1,13 @@
 mod auth;
 mod chat;
 mod cors;
+mod events;
 mod log;
-mod ws_handler;
 #[cfg(test)]
 mod test;
 mod timing;
 mod types;
+mod ws_handler;
 #[macro_use]
 extern crate rocket;
 const FILE_PATH: &str = "./public";
@@ -31,7 +32,7 @@ use std::path::PathBuf;
 use types::{User, UserDB, UserID, UserStatus};
 
 #[database("sqlite_db")]
-struct SqliteDB(SqliteConnection);
+pub struct SqliteDB(SqliteConnection);
 
 use tokio::runtime::{Handle, Runtime};
 pub fn get_runtime_handle() -> (Handle, Option<Runtime>) {
