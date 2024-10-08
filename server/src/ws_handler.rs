@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -56,4 +55,13 @@ macro_rules! impl_user_event {
 }
 use crate::events::*;
 // Register the event handlers using the macro
-impl_user_event!(Message:ChatMessage, Egress:RoomEgress, TimingAction:TimingAction; CheckTime:CheckTime; (SqliteDB, UserDB));
+impl_user_event!(
+  Message:ChatMessage, 
+  Egress:RoomEgress, 
+  TimingAction:TimingAction; 
+
+  CheckTime:CheckTime, 
+  ListUsers:ListUsers; 
+  
+  (SqliteDB, UserDB)
+);

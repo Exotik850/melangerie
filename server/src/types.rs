@@ -34,7 +34,7 @@ impl UserDB {
                     log::error!("Failed to send message to user: {e:?}");
                 };
             } else {
-                log::warn!("User not found: {:?}", user);
+                log::warn!("User not found or inactive: {:?}", user);
             }
         }
     }
