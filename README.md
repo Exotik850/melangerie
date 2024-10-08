@@ -1,6 +1,8 @@
-# Office Chat
+# Melangerie
 
-Office Chat is a real-time chat application built with Rust and Rocket, a web framework for Rust. It allows users to create chat rooms, invite other users to join, and send messages within those rooms. The application uses WebSocket for real-time communication and JSON Web Tokens (JWT) for user authentication.
+![Melangerie Screenshot](.\server\public\melangerie.png)
+
+Melangerie is a real-time chat application built with Rust, Svelte, and Rocket, a web framework for Rust. The main purpose is an in-house alternative to apps like Microsoft Teams and Skype when just used for basic communication. It allows users to create chat rooms, invite other users to join, and send messages within those rooms. The application uses WebSockets for real-time communication and JSON Web Tokens (JWT) for user authentication.
 
 ## Features
 
@@ -57,20 +59,24 @@ office-chat-rs/
 
 1. Clone the repository:s
    ```
-   git clone https://github.com/your-username/office-chat-rs.git
+   git clone https://github.com/exotik850/melangerie.git
    ```
 
-2. Change to the `server` directory:
+2. Change to the `client` directory and install dependencies:
+    ```
+    cd melangerie/client && npm i
+    ```
+
+3. Build the client for the backend to serve:
+    ```
+    npm run build
+    ```
+4. Change to the `server` directory:
    ```
-   cd office-chat-rs/server
+   cd ../server
    ```
 
-3. Build the project:
-   ```
-   cargo build
-   ```
-
-4. Set up the environment variables:
+5. Set up the environment variables:
    - Create a `.env` file in the `server` directory.
    - Add the following variables to the `.env` file:
      ```
@@ -78,12 +84,12 @@ office-chat-rs/
      ```
      Replace `your-jwt-secret` with a secure secret key for JWT generation and verification.
 
-5. Run the server:
+6. Run the server:
    ```
    cargo run
    ```
 
-   The server will start running at `http://localhost:8000`.
+   The server will start running at `http://0.0.0.0:8080`.
 
 ## API Endpoints
 
@@ -111,14 +117,6 @@ The WebSocket messages are JSON-encoded and follow a specific structure defined 
 ## Logging
 
 The application includes a logging mechanism to log server events and user reports. The `Log` struct in `log.rs` handles writing log messages to a file named `log.txt`. The server periodically flushes the log buffer to ensure that logs are persisted.
-
-## Testing
-
-The project includes unit tests in the `test.rs` file. To run the tests, use the following command:
-
-```
-cargo test
-```
 
 ## Contributing
 
