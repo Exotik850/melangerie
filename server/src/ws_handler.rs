@@ -56,12 +56,12 @@ macro_rules! impl_user_event {
 use crate::events::*;
 // Register the event handlers using the macro
 impl_user_event!(
-  Message:ChatMessage, 
-  Egress:RoomEgress, 
-  TimingAction:TimingAction; 
+  Message:ChatMessage,
+  Egress:RoomEgress,
+  TimingAction:TimingAction;
 
-  CheckTime:CheckTime, 
-  ListUsers:ListUsers; 
-  
+  CheckTime:CheckTime,
+  ListUsers:ListUsers;
+
   (SqliteDB, UserDB)
 );

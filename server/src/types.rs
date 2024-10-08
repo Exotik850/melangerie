@@ -44,6 +44,9 @@ impl UserDB {
             log::info!("User disconnected: {:?}", id);
         }
     }
+    pub async fn all_users(&self) -> Vec<UserID> {
+        self.read().await.keys().cloned().collect()
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -153,14 +156,18 @@ impl FromSql for ChatRoomID {
         value.as_str().map(|i| ChatRoomID(i.into()))
     }
 }
-
+impl std::fmt::Display for ChatRoomID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 impl<'r> FromParam<'r> for ChatRoomID {
     type Error = &'static str;
     fn from_param(param: &'r str) -> Result<Self, Self::Error> {
         Ok(ChatRoomID(param.to_string()))
     }
 }
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, )]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct ChatMessage {
     // pub id: MessageID,
     pub sender: UserID,
