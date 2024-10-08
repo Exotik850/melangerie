@@ -155,8 +155,11 @@
       note = null;
     }
     sendMessage({
-      action: $timedIn ? "TimeOut" : "TimeIn",
-      data: note,
+      action: "TimingAction",
+      data: {
+        action: $timedIn ? "TimeOut" : "TimeIn",
+        note,
+      },
     });
     timingIn = false;
     sendMessage({

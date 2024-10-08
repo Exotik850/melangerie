@@ -35,23 +35,25 @@ pub trait UserEvent {
 
 // Macro to simplify event handler registration
 macro_rules! impl_user_event {
-  ($($event_name:ident:$event:ty),+; $state:ty) => {
+  ($($event_name:ident:$event:ty),+; $($unit_event_name:ident:$unit_event:expr),+; $state:ty) => {
       #[derive(Serialize, Deserialize)]
       #[serde(tag = "action", content = "data")]
       pub enum Event {
-          $($event_name($event)),+
+          $($event_name($event),)+
+          $($unit_event_name),+
       }
       #[async_trait]
       impl UserEvent for Event {
           type State = $state;
           async fn handle(self, user_id: &UserID, state: &Self::State) {
               match self {
-                  $(Event::$event_name(event) => event.handle(user_id, state).await),+
+                  $(Event::$event_name(event) => event.handle(user_id, state).await,)+
+                  $(Event::$unit_event_name => $unit_event.handle(user_id, state).await,)+
               }
           }
       }
   }
 }
-use crate::events::RoomEgress;
+use crate::events::*;
 // Register the event handlers using the macro
-impl_user_event!(Message:ChatMessage, Egress:RoomEgress; (SqliteDB, UserDB));
+impl_user_event!(Message:ChatMessage, Egress:RoomEgress, TimingAction:TimingAction; CheckTime:CheckTime; (SqliteDB, UserDB));

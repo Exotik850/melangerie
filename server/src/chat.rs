@@ -394,69 +394,15 @@ async fn handle_user_message(
             send_action(ServerAction::List(user), user_db, id).await;
         }
         UserAction::TimeIn(note) => {
-            log::info!("{} Timed in: {:?}", id, note);
-            let id = id.clone();
-            if let Err(e) = db
-                .run(move |d| {
-                    let statement = format!(
-                        "BEGIN TRANSACTION; \
-                INSERT INTO time_entries (timesheet_id, start_time, start_note) \
-                SELECT timesheet_id, CURRENT_TIMESTAMP, '{}' \
-                FROM timesheets WHERE user_id = '{id}' AND clocked_in = 0;
-                UPDATE timesheets SET clocked_in = 1 WHERE user_id = '{id}' AND clocked_in = 0;
-                COMMIT;",
-                        note.as_deref().unwrap_or("NULL")
-                    );
-                    d.execute_batch(&statement)
-                })
-                .await
-            {
-                log::error!("Failed to insert time entry: {}", e);
-            };
+            
         }
         UserAction::TimeOut(note) => {
-            log::info!("{} Timed out: {:?}", id, note);
-            let id = id.clone();
-            if let Err(e) = db
-                .run(move |d| {
-                    let statement = format!(
-                        "BEGIN TRANSACTION; \
-                UPDATE time_entries \
-                SET end_time = CURRENT_TIMESTAMP, end_note = '{}' \
-                WHERE time_entry_id = (
-                  SELECT current_id
-                  FROM timesheets
-                  WHERE user_id = '{id}' AND clocked_in = 1
-                );
-                UPDATE timesheets
-                SET clocked_in = 0, current_id = NULL
-                WHERE user_id = '{id}' AND clocked_in = 1;
-                COMMIT;",
-                        note.as_deref().unwrap_or("NULL")
-                    );
-                    d.execute_batch(&statement)
-                })
-                .await
-            {
-                log::error!("Failed to insert time entry: {}", e);
-            };
+            
         }
         UserAction::CheckTime => {
             // let timed_in = server_state.time.is_active(id).await.unwrap_or(false);
             let aid = id.clone();
-            let timed_in = db
-                .run(move |d| {
-                    d.query_row(
-                        "select clocked_in from timesheets where user_id = ?",
-                        params![aid.0],
-                        |r| r.get(0),
-                    )
-                    .inspect_err(|e| log::error!("Failed to check time: {}", e))
-                    .unwrap_or(false)
-                })
-                .await;
-            // let timed_in = false;
-            send_action(ServerAction::TimedIn(timed_in), user_db, id).await;
+            
         }
         // UserAction::AllowTime()
         _ => {
