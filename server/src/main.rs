@@ -2,7 +2,7 @@ mod auth;
 mod chat;
 mod cors;
 mod events;
-mod log;
+mod logger;
 #[cfg(test)]
 mod test;
 mod timing;
@@ -14,9 +14,9 @@ const FILE_PATH: &str = "./public";
 type LockedSet<T> = RwLock<HashSet<T>>;
 use std::collections::HashSet;
 
+use logger::Log;
 // Map Users to their sender which is sending to their active websocket connection
 // and a Vec of messages that have been sent to them while they were offline
-use log::Log;
 use rocket::fairing::AdHoc;
 use rocket::tokio;
 use rocket::{
@@ -27,12 +27,46 @@ use rocket::{
     State,
 };
 use rocket_sync_db_pools::{database, rusqlite::Connection as SqliteConnection};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use types::{User, UserDB, UserID, UserStatus};
+use types::{ChatMessage, ChatRoomID, User, UserDB, UserID, UserStatus};
 
 #[database("sqlite_db")]
 pub struct SqliteDB(SqliteConnection);
+
+impl SqliteDB {
+    async fn send_msg(&self, msg: ChatMessage, user_db: &UserDB) {
+        let chatroom_id = msg.room.clone();
+        let users: Vec<_> = match self
+            .run(move |d| {
+                d.prepare("select user_id from chatroom_users where chatroom_id = ?")?
+                    .query_map(params![chatroom_id.0], |r| {
+                        r.get(0).map(crate::types::UserID)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+        {
+            Ok(users) => users,
+            Err(e) => {
+                log::error!("Failed to get users from chatroom: {}", e);
+                return;
+            }
+        };
+        user_db.write_to(msg.clone(), &users).await;
+        if let Err(e) = self.run(move |d| {
+          d.execute(
+              "INSERT INTO messages (user_id, chatroom_id, message, created_at) VALUES (?, ?, ?, ?)",
+              params![msg.sender.0, msg.room.0, msg.content, msg.timestamp],
+          )
+      })
+      .await
+  {
+      log::error!("Failed to insert message into database: {}", e);
+  };
+    }
+}
 
 use tokio::runtime::{Handle, Runtime};
 pub fn get_runtime_handle() -> (Handle, Option<Runtime>) {

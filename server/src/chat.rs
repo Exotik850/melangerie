@@ -1,4 +1,4 @@
-use crate::log::Log;
+use crate::logger::Log;
 use crate::types::{message_from_row, ChatRoomID, ServerAction, UserAction, UserDB};
 use crate::ws_handler::WebSocketHandler;
 use crate::SqliteDB;
@@ -43,26 +43,6 @@ pub async fn list_rooms(db: SqliteDB, user: Jwt) -> Json<Vec<String>> {
     Json(rooms)
 }
 
-async fn add_user(user_id: UserID, room: ChatRoomID, db: &SqliteDB) -> bool {
-    // Add the user to the room
-
-    db
-  .run(move |d| {
-            let Ok(_): Result<String, _> = d.query_row(
-                "select chatroom_id from chatrooms c inner join chatroom_users cu on c.chatroom_id = cu.chatroom_id where cu.user_id != ? and c.chatroom_id = ?",
-                params![room.0],
-                |r| r.get(0),
-            ) else {
-              return false;
-            };
-            if d.execute("insert into chatroom_users (chatroom_id, user_id) values (?, ?)", params![room.0, user_id.0]).is_err() {
-                return false;
-            };
-            true
-        })
-        .await
-}
-
 #[post("/adduser/<room>/<user_id>")]
 pub async fn add_user_to_room(
     room: ChatRoomID,
@@ -71,9 +51,9 @@ pub async fn add_user_to_room(
     user_db: &State<UserDB>,
     auth_user: Jwt,
 ) -> Status {
-    if !add_user(user_id.clone(), room.clone(), &db).await {
-        return Status::NotFound;
-    };
+    // if !add_user(user_id.clone(), room.clone(), &db).await {
+    //     return Status::NotFound;
+    // };
     // send_msg(
     //     ChatMessage {
     //         // id: MessageID(0),
@@ -208,8 +188,8 @@ async fn get_auth(stream: &mut DuplexStream) -> Option<UserID> {
 }
 
 async fn send_action(action: ServerAction, user_db: &UserDB, id: &UserID) {
-    let mut user_db = user_db.write().await;
-    let Some(user) = user_db.get_mut(id) else {
+    let user_db = user_db.write().await;
+    let Some(user) = user_db.get(id) else {
         log::error!("User not found: {:?}", id);
         return;
     };
@@ -393,16 +373,11 @@ async fn handle_user_message(
             let user: Vec<_> = user_db.read().await.keys().cloned().collect();
             send_action(ServerAction::List(user), user_db, id).await;
         }
-        UserAction::TimeIn(note) => {
-            
-        }
-        UserAction::TimeOut(note) => {
-            
-        }
+        UserAction::TimeIn(note) => {}
+        UserAction::TimeOut(note) => {}
         UserAction::CheckTime => {
             // let timed_in = server_state.time.is_active(id).await.unwrap_or(false);
             let aid = id.clone();
-            
         }
         // UserAction::AllowTime()
         _ => {

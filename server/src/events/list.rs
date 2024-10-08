@@ -22,18 +22,7 @@ impl UserEvent for ListUsers {
             println!("User not active: {user_id}");
             return;
         };
-        let res = sqldb
-            .run(move |db| {
-                db.prepare("SELECT user_id FROM users")?
-                    .query_map([], |row| row.get(0))?
-                    .collect::<Result<Vec<UserID>, _>>()
-            })
-            .await;
-        let Ok(users) = res else {
-            println!("Failed to list users: {}", res.unwrap_err());
-            return;
-        };
-
+        let users = udb.all_users().await;
         if let Err(e) = tx.send(ServerAction::List(users)) {
             log::error!("Failed to send list of users: {e:?}");
         };
