@@ -185,7 +185,7 @@ pub async fn create_room(
                 sender: "admin".into(),
                 room: name,
                 content: format!("{} created the room", user.name.0),
-                timestamp: jsonwebtoken::get_current_timestamp(),
+                timestamp: jsonwebtoken::get_current_timestamp() as f64,
             },
             &uclone,
         )

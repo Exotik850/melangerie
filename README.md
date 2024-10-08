@@ -1,6 +1,6 @@
 # Melangerie
 
-![Melangerie Screenshot](server/public/melangerie.png)
+![Melangerie Screenshot](client/static/melangerie.png)
 
 Melangerie is a real-time chat application built with Rust, Svelte, and Rocket, a web framework for Rust. The main purpose is an in-house alternative to apps like Microsoft Teams and Skype when just used for basic communication. It allows users to create chat rooms, invite other users to join, and send messages within those rooms. The application uses WebSockets for real-time communication and JSON Web Tokens (JWT) for user authentication.
 

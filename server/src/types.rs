@@ -160,14 +160,13 @@ impl<'r> FromParam<'r> for ChatRoomID {
         Ok(ChatRoomID(param.to_string()))
     }
 }
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, )]
 pub struct ChatMessage {
     // pub id: MessageID,
     pub sender: UserID,
     pub room: ChatRoomID,
     pub content: String,
-    pub timestamp: u64,
+    pub timestamp: f64,
 }
 
 pub fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
