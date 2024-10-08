@@ -64,16 +64,13 @@ impl UserEvent for RoomEgress {
                 }
             }
             RoomEvent::Join => {
-                if !add_user(
+                add_user(
                     UserID(user_id.clone()),
                     ChatRoomID(room_id.clone()),
                     db,
                     user_db,
                 )
-                .await
-                {
-                    log::error!("Failed to add {user_id} to {room_id}");
-                };
+                .await;
             }
         };
     }
@@ -84,21 +81,19 @@ async fn add_user(user_id: UserID, room: ChatRoomID, db: &SqliteDB, user_db: &Us
 
     let content = format!("User {} joined room {}", user_id, room);
     let room_id = room.clone();
-    db
+    if let Err(e) = db
 .run(move |d| {
-          let Ok(_): Result<String, _> = d.query_row(
-              "select chatroom_id from chatrooms c inner join chatroom_users cu on c.chatroom_id = cu.chatroom_id where cu.user_id != ? and c.chatroom_id = ?",
-              params![room.0],
+          let _: String = d.query_row(
+              "select c.chatroom_id from chatrooms c inner join chatroom_users cu on c.chatroom_id = cu.chatroom_id where cu.user_id != ? and c.chatroom_id = ?",
+              params![user_id.0, room.0],
               |r| r.get(0),
-          ) else {
-            return false;
-          };
-          if d.execute("insert into chatroom_users (chatroom_id, user_id) values (?, ?)", params![room.0, user_id.0]).is_err() {
-              return false;
-          };
-          true
+          )?;
+          d.execute("insert into chatroom_users (chatroom_id, user_id) values (?, ?)", params![room.0, user_id.0])
       })
-      .await;
+      .await {
+        log::error!("Failed to add user to room: {}", e);
+        return false;
+    };
 
     db.send_msg(
         ChatMessage {

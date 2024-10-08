@@ -7,10 +7,12 @@ use crate::{
     types::{ChatMessage, UserStatus},
     UserID,
 };
+
 use rocket::futures::{SinkExt, StreamExt};
 use rocket::http::Status;
 use rocket::serde::json::Json;
 use rocket::tokio::select;
+use rocket::tokio::sync::broadcast::Receiver;
 use rocket::{Shutdown, State};
 use rusqlite::params;
 use std::path::PathBuf;
@@ -215,42 +217,87 @@ async fn handle_connection(
         let _ = stream.send(Message::Close(None)).await;
         return Ok(());
     };
-    let uida = id.clone();
-    let uidb = id.clone();
 
-    let (mut rx, chat) = {
-        let mut user_db = user_db.write().await;
-        let Some(user) = user_db.get_mut(&id) else {
-            log::error!("User not found: {:?}", id);
-            let _ = stream.send(Message::Close(None)).await;
-            return Ok(());
-        };
-        if let UserStatus::Active(_) = &user.status {
-            let _ = stream.send(Message::Close(None)).await;
-            log::error!("User already connected: {:?}", id);
-            return Ok(());
-        }
-        let (tx, rx) = rocket::tokio::sync::broadcast::channel(16);
-
-        let messages = db.run(move |d| {
-          d.prepare("SELECT m.* FROM messages m INNER JOIN chatroom_users cu ON m.chatroom_id = cu.chatroom_id WHERE cu.user_id = ?")?
-            .query_map(params![uida.0], message_from_row)?
-            .collect::<Result<Vec<_>, _>>()
-        }).await.map_err(|e| {
-          println!("Error gathering messages: {:?}", e);
-          ws::result::Error::Utf8
-        })?;
-
-        if messages.is_empty() {
-            log::error!("No messages found for user: {:?}", id);
-        } else {
-            log::info!("Found {} messages for {:?}", messages.len(), id);
-        }
-
-        user.status = UserStatus::Active(tx);
-        (rx, messages)
+    let Some((mut rx, chat)) = grab_user(user_db, &id, &mut stream, &db).await? else {
+        let _ = stream.send(Message::Close(None)).await;
+        return Ok(());
     };
 
+    send_initial_data(&db, &id, &mut stream, chat).await?;
+
+    let state = (db, user_db.clone());
+    loop {
+        select! {
+            // Shutdown the connection if the server is shutting down
+            _ = &mut shutdown => {
+                let _ = stream.send(Message::Close(None)).await;
+                log::info!("Shutting down connection: {:?}", id);
+                user_db.close_user(&id).await;
+                break;
+            },
+            // A message has been sent to this user
+            recv_msg = rx.recv() => if let Ok(msg) = recv_msg {
+                let _ = stream.send(Message::binary(serde_json::to_vec(&msg).unwrap())).await;
+            },
+            // A message has been received from the user
+            sent_msg = stream.next() => if let Some(Ok(msg)) = sent_msg {
+                // if handle_user_message(msg, &id, &db, user_db, log).await {
+                //     let _ = stream.send(Message::Close(None)).await;
+                //     user_db.close_user(&id).await;
+                //     break;
+                // }
+                state.handle_message(&id, msg).await;
+            }
+        }
+        stream.flush().await?;
+    }
+
+    Ok(())
+}
+
+async fn grab_user(
+    user_db: &UserDB,
+    id: &UserID,
+    stream: &mut DuplexStream,
+    db: &SqliteDB,
+) -> Result<Option<(Receiver<ServerAction>, Vec<ChatMessage>)>, ws::result::Error> {
+    let uida = id.clone();
+    let mut user_db = user_db.write().await;
+    let Some(user) = user_db.get_mut(id) else {
+        log::error!("User not found: {:?}", id);
+        let _ = stream.send(Message::Close(None)).await;
+        return Ok(None);
+    };
+    if let UserStatus::Active(_) = &user.status {
+        let _ = stream.send(Message::Close(None)).await;
+        log::error!("User already connected: {:?}", id);
+        return Ok(None);
+    }
+    let (tx, rx) = rocket::tokio::sync::broadcast::channel(16);
+    let messages = db.run(move |d| {
+      d.prepare("SELECT m.* FROM messages m INNER JOIN chatroom_users cu ON m.chatroom_id = cu.chatroom_id WHERE cu.user_id = ?")?
+        .query_map(params![uida.0], message_from_row)?
+        .collect::<Result<Vec<_>, _>>()
+    }).await.map_err(|e| {
+      println!("Error gathering messages: {:?}", e);
+      ws::result::Error::Utf8
+    })?;
+    if messages.is_empty() {
+        log::error!("No messages found for user: {:?}", id);
+    } else {
+        log::info!("Found {} messages for {:?}", messages.len(), id);
+    }
+    user.status = UserStatus::Active(tx);
+    Ok(Some((rx, messages)))
+}
+
+async fn send_initial_data(
+    db: &SqliteDB,
+    id: &UserID,
+    stream: &mut DuplexStream,
+    chat: Vec<ChatMessage>,
+) -> Result<(), ws::result::Error> {
+    let uidb = id.clone();
     for room in db
         .run(move |d| {
             d.prepare("select chatroom_id from chatroom_users where user_id = ?")?
@@ -280,34 +327,6 @@ async fn handle_connection(
             .send(Message::binary(serde_json::to_vec(&action).unwrap()))
             .await;
     }
-
-    let state = (db, user_db.clone());
-    loop {
-        select! {
-            // Shutdown the connection if the server is shutting down
-            _ = &mut shutdown => {
-                let _ = stream.send(Message::Close(None)).await;
-                log::info!("Shutting down connection: {:?}", id);
-                user_db.close_user(&id).await;
-                break;
-            },
-            // A message has been sent to this user
-            recv_msg = rx.recv() => if let Ok(msg) = recv_msg {
-                let _ = stream.send(Message::binary(serde_json::to_vec(&msg).unwrap())).await;
-            },
-            // A message has been received from the user
-            sent_msg = stream.next() => if let Some(Ok(msg)) = sent_msg {
-                // if handle_user_message(msg, &id, &db, user_db, log).await {
-                //     let _ = stream.send(Message::Close(None)).await;
-                //     user_db.close_user(&id).await;
-                //     break;
-                // }
-                state.handle_message(&id, msg).await;
-            }
-        }
-        stream.flush().await?;
-    }
-
     Ok(())
 }
 
